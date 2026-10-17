@@ -65,3 +65,6 @@ nav.chips a.on{background:var(--c);border-color:var(--c);color:#fff}
 .contact a{color:var(--c)}
 code{background:#f0f2f6;padding:1px 5px;border-radius:4px}
 .msg.operator{align-self:flex-start;background:#fff5e0;border:1px solid #f0dcb0}
+.good{color:#1e7a3c}.bad{color:#a32020}
+form.row-form{display:flex;gap:10px;align-items:flex-end;flex-wrap:wrap}form.row-form label{margin:0}form.row-form input{width:100px;display:block}form.row-form button{margin:0}
+pre.log{max-height:420px;overflow:auto;font-size:12px}

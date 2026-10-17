@@ -52,6 +52,14 @@ try {
     b24_log(sprintf('%s bot=%d chat=%d user=%d %s', $e['event'], $e['bot_id'], $e['chat_id'], $e['user_id'],
         $e['text'] !== '' ? '«' . mb_substr($e['text'], 0, 60) . '»' : ''));
 
+    // Бот работает только в линиях, включённых в админке (Битрикс24 → линии)
+    $lineId = b24_line_id($e['entity_id']);
+    if ($e['entity_type'] === 'LINES' && $lineId && !b24_line_enabled($lineId)) {
+        if ($isRouter && $e['chat_id'] && $e['event'] === 'ONIMBOTMESSAGEADD') b24_router_handoff($e['chat_id']); // не задерживаем клиента
+        b24_log("линия $lineId выключена в админке — пропускаю");
+        exit;
+    }
+
     /* ---------- новое обращение ---------- */
     if ($e['event'] === 'ONIMBOTJOINCHAT') {
         if ($isRouter && $e['chat_id']) b24_add_consultant($e['chat_id']);
@@ -123,7 +131,7 @@ try {
     $st['client_id'] = $cid;
     st_set($chatKey, $st);
 
-    $pauseMin = (int)cfg('bitrix_operator_pause_min', 10);
+    $pauseMin = b24_pause_min();
     $silent = !empty($st['paused']) || (!empty($st['op_ts']) && time() - (int)$st['op_ts'] < $pauseMin * 60);
     if (!$silent && rate_limited('b24:' . $e['user_id'])) $silent = true;
 

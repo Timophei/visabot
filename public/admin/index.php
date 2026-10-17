@@ -109,6 +109,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 update_request($id, array_map(fn($v) => str_replace("\r\n", "\n", (string)$v), $data), true);
                 $_SESSION['flash'] = 'Лид сохранён.';
                 header('Location: ?tab=requests&id=' . $id); exit;
+            case 'b24_line':
+                b24_line_set((int)$_POST['line'], $_POST['on'] === '1');
+                back('bitrix', 'Линия ' . (int)$_POST['line'] . ': бот ' . ($_POST['on'] === '1' ? 'включён' : 'выключен') . '.');
+            case 'b24_pause':
+                set_setting('b24_pause', (string)max(0, (int)$_POST['pause']));
+                back('bitrix', 'Пауза сохранена.');
             case 'delete_client':
                 delete_client((int)$_POST['id']);
                 back('clients', 'Клиент и все его диалоги удалены.');
@@ -122,6 +128,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 $docs = db()->query('SELECT * FROM documents ORDER BY id DESC')->fetchAll();
 $tabs = ['requests' => 'Лиды', 'clients' => 'Клиенты', 'prompt' => 'Промт', 'company' => 'Данные компании', 'docs' => 'Материалы', 'test' => 'Проверка'];
 $channelName = CHANNEL_NAMES;
+if (cfg('bitrix_webhook')) $tabs['bitrix'] = 'Битрикс24';
 ?><!doctype html>
 <html lang="ru"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <title>Админка — визовый бот</title><link rel="stylesheet" href="admin.css">
@@ -222,6 +229,54 @@ $channelName = CHANNEL_NAMES;
       <?php endforeach; ?>
     </div>
   <?php endif; ?>
+
+<?php elseif ($tab === 'bitrix'): ?>
+  <?php
+    $b24err = '';
+    $lines = [];
+    try { $lines = b24_lines_status(); } catch (Throwable $e) { $b24err = $e->getMessage(); }
+    $botOk = cfg('bitrix_bot_id') && cfg('bitrix_router_bot_id');
+  ?>
+  <div class="card">
+    <h2>Подключение</h2>
+    <p class="hint">Портал: <?= h(b24_portal()) ?> ·
+      <?= $b24err ? '<b class="bad">вебхук не отвечает: ' . h($b24err) . '</b>' : '<span class="good">вебхук работает</span>' ?> ·
+      боты: <?= $botOk ? '<span class="good">Консультант #' . (int)cfg('bitrix_bot_id') . ', Приёмщик #' . (int)cfg('bitrix_router_bot_id') . ' (' . h(b24_api()) . ')</span>' : '<b class="bad">не зарегистрированы — php bin/bitrix-register.php</b>' ?> ·
+      лиды: <?= cfg('bitrix_crm_mode', 'comments') === 'fields' ? 'поля «Виза: …»' : 'текстом в комментарий' ?></p>
+    <form method="post" class="row-form">
+      <input type="hidden" name="csrf" value="<?= csrf() ?>"><input type="hidden" name="do" value="b24_pause">
+      <label>Бот молчит после реплики оператора, минут <input type="number" name="pause" min="0" max="1440" value="<?= b24_pause_min() ?>"></label>
+      <button>Сохранить</button>
+    </form>
+  </div>
+  <div class="card">
+    <h2>Открытые линии</h2>
+    <p class="hint">Включение прописывает «Приёмщика» чат-ботом линии: он добавляет Консультанта в каждый новый диалог и сразу отдаёт диалог в обычную очередь операторов. Подключения каналов не меняются.</p>
+    <?php if ($lines): ?>
+    <table>
+      <tr><th>#</th><th>Линия</th><th>Чат-бот в настройках линии</th><th>Бот работает</th><th></th></tr>
+      <?php foreach ($lines as $l): ?>
+        <tr class="<?= $l['active'] ? '' : 'off' ?>">
+          <td><?= $l['id'] ?></td>
+          <td><?= h($l['name']) ?><?= $l['active'] ? '' : ' <small>(линия выключена)</small>' ?></td>
+          <td><?= ['ours' => '<span class="good">наш Приёмщик</span>', 'other' => '<b class="bad">другой бот #' . $l['b24_bot_id'] . '</b>', 'none' => '—'][$l['b24_bot']] ?></td>
+          <td><?= $l['enabled'] && $l['b24_bot'] === 'ours' ? '<span class="st st-done">да</span>' : ($l['enabled'] ? '<span class="st st-new">включён у нас, но не в линии</span>' : '<span class="st">нет</span>') ?></td>
+          <td class="act">
+            <form method="post"><input type="hidden" name="csrf" value="<?= csrf() ?>"><input type="hidden" name="do" value="b24_line"><input type="hidden" name="line" value="<?= $l['id'] ?>">
+              <?php if ($l['enabled']): ?><input type="hidden" name="on" value="0"><button class="sec">Выключить</button>
+              <?php else: ?><input type="hidden" name="on" value="1"><button <?= $botOk ? '' : 'disabled' ?> <?= $l['b24_bot'] === 'other' ? "onclick=\"return confirm('В этой линии уже назначен другой чат-бот. Заменить его нашим?')\"" : '' ?>>Включить</button><?php endif; ?>
+            </form>
+          </td>
+        </tr>
+      <?php endforeach; ?>
+    </table>
+    <?php endif; ?>
+  </div>
+  <div class="card">
+    <h2>Журнал (последние события)</h2>
+    <?php $logf = cfg('data_dir', BOT_ROOT . '/data') . '/bitrix.log'; $log = is_file($logf) ? array_slice(file($logf), -60) : []; ?>
+    <?php if (!$log): ?><p class="hint">Пока пусто. Напишите в линию как клиент.</p><?php else: ?><pre class="log"><?= h(implode('', array_reverse($log))) ?></pre><?php endif; ?>
+  </div>
 
 <?php elseif ($tab === 'requests' && isset($_GET['id']) && ($r = get_request((int)$_GET['id']))): $c = get_client((int)$r['client_id']); ?>
   <p><a href="?tab=requests">← Все лиды</a></p>

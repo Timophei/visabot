@@ -209,9 +209,41 @@ function b24_install_fields(callable $log): void
     }
 }
 
+/** Текст сведений для комментария лида. */
+function b24_comment_block(array $request, array $client): string
+{
+    $lines = ['[b]Визовый бот — сведения из переписки[/b] (обновлено ' . date('d.m.Y H:i') . ')'];
+    foreach (REQUEST_FIELDS as $f => $label) {
+        if ((string)$request[$f] !== '') $lines[] = $label . ': ' . $request[$f];
+    }
+    $contacts = [];
+    if (trim($client['first_name'] . $client['last_name']) !== '') $contacts[] = trim($client['first_name'] . ' ' . $client['last_name']);
+    if ($client['phone'] !== '') $contacts[] = $client['phone'];
+    if ($client['messenger'] !== '') $contacts[] = trim((MESSENGERS[$client['messenger']] ?? $client['messenger']) . ' ' . $client['messenger_contact']);
+    if ($contacts) $lines[] = 'Контакты: ' . implode(', ', $contacts);
+    if ($request['status'] !== 'draft' || $request['ready']) $lines[] = '[b]Клиент готов оформлять[/b]';
+    $url = rtrim((string)cfg('public_url', ''), '/');
+    if ($url !== '') $lines[] = 'Лид в боте: ' . $url . '/admin/?tab=requests&id=' . $request['id'];
+    return implode("\n", $lines);
+}
+
+const B24_MARK_START = '=== Визовый бот ===';
+const B24_MARK_END = '=== / Визовый бот ===';
+
+/** Вставляет/заменяет блок бота в тексте комментария, не трогая то, что написали менеджеры. */
+function b24_merge_comments(string $comments, string $block): string
+{
+    $wrapped = B24_MARK_START . "\n" . $block . "\n" . B24_MARK_END;
+    $re = '/' . preg_quote(B24_MARK_START, '/') . '.*?' . preg_quote(B24_MARK_END, '/') . '/su';
+    if (preg_match($re, $comments)) return preg_replace($re, str_replace(['\\', '$'], ['\\\\', '\$'], $wrapped), $comments, 1);
+    return trim($comments) === '' ? $wrapped : rtrim($comments) . "\n\n" . $wrapped;
+}
+
 /**
- * Записывает сведения лида бота в лид/сделку Битрикс24. Пишет только при изменениях.
- * Имя и телефон клиента — в лид (у сделки они живут в контакте, их не трогаем).
+ * Записывает сведения в лид/сделку Битрикс24, привязанный к чату. Пишет только при изменениях.
+ * Режим bitrix_crm_mode: 'comments' (по умолчанию) — текстом в «Комментарий»;
+ * 'fields' — в пользовательские поля «Виза: …» (создаются php bin/bitrix-register.php --fields).
+ * Имя и телефон клиента дописываются в лид, если там пусто / такого номера нет.
  */
 function b24_sync_crm(array $request, array $client, int $chatId, string $entityData = ''): void
 {
@@ -222,34 +254,106 @@ function b24_sync_crm(array $request, array $client, int $chatId, string $entity
         $request['crm_type'] = $bind[0];
         $request['crm_id'] = $bind[1];
     }
-    $fields = [];
-    foreach (B24_LEAD_FIELDS as $f => [$code]) {
-        $v = $f === 'ready' ? ($request['status'] !== 'draft' || $request['ready'] ? 'да' : '') : (string)$request[$f];
-        if ($v !== '') $fields['UF_CRM_' . $code] = $v;
-    }
-    if ($request['crm_type'] === 'LEAD') {
-        if ($client['first_name'] !== '') $fields['NAME'] = $client['first_name'];
-        if ($client['last_name'] !== '') $fields['LAST_NAME'] = $client['last_name'];
-    }
-    $hash = md5(json_encode($fields, JSON_UNESCAPED_UNICODE) . '|' . $client['phone']);
+    $mode = cfg('bitrix_crm_mode', 'comments') === 'fields' ? 'fields' : 'comments';
+    $state = [$mode, $client['first_name'], $client['last_name'], $client['phone'], $client['messenger'], $client['messenger_contact'], $request['status'], $request['ready']];
+    foreach (REQUEST_FIELDS as $f => $_) $state[] = $request[$f];
+    $hash = md5(json_encode($state, JSON_UNESCAPED_UNICODE));
     if ($hash === $request['crm_hash']) return;
 
     $type = strtolower($request['crm_type']);
     try {
-        b24("crm.$type.update", ['id' => $request['crm_id'], 'fields' => $fields, 'params' => ['REGISTER_SONET_EVENT' => 'N']]);
-        // телефон добавляем в лид, только если такого номера ещё нет
-        if ($type === 'lead' && $client['phone'] !== '') {
-            $lead = b24('crm.lead.get', ['id' => $request['crm_id']])['result'] ?? [];
-            $have = array_map(fn($p) => preg_replace('/\D/', '', (string)$p['VALUE']), $lead['PHONE'] ?? []);
-            if (!in_array(preg_replace('/\D/', '', $client['phone']), $have, true)) {
-                b24('crm.lead.update', ['id' => $request['crm_id'], 'fields' => ['PHONE' => [['VALUE' => $client['phone'], 'VALUE_TYPE' => 'MOBILE']]]]);
+        $entity = b24("crm.$type.get", ['id' => $request['crm_id']])['result'] ?? [];
+        $fields = [];
+        if ($mode === 'fields') {
+            foreach (B24_LEAD_FIELDS as $f => [$code]) {
+                $v = $f === 'ready' ? ($request['status'] !== 'draft' || $request['ready'] ? 'да' : '') : (string)$request[$f];
+                if ($v !== '') $fields['UF_CRM_' . $code] = $v;
+            }
+        } else {
+            $fields['COMMENTS'] = b24_merge_comments((string)($entity['COMMENTS'] ?? ''), b24_comment_block($request, $client));
+        }
+        if ($type === 'lead') {
+            if ($client['first_name'] !== '' && trim((string)($entity['NAME'] ?? '')) === '') $fields['NAME'] = $client['first_name'];
+            if ($client['last_name'] !== '' && trim((string)($entity['LAST_NAME'] ?? '')) === '') $fields['LAST_NAME'] = $client['last_name'];
+            if ($client['phone'] !== '') {
+                $have = array_map(fn($p) => preg_replace('/\D/', '', (string)$p['VALUE']), $entity['PHONE'] ?? []);
+                if (!in_array(preg_replace('/\D/', '', $client['phone']), $have, true)) {
+                    $fields['PHONE'] = [['VALUE' => $client['phone'], 'VALUE_TYPE' => 'MOBILE']];
+                }
             }
         }
+        b24("crm.$type.update", ['id' => $request['crm_id'], 'fields' => $fields, 'params' => ['REGISTER_SONET_EVENT' => 'N']]);
         db()->prepare('UPDATE requests SET crm_hash = ? WHERE id = ?')->execute([$hash, $request['id']]);
         b24_log("CRM {$request['crm_type']} {$request['crm_id']}: обновлено (" . implode(', ', array_keys($fields)) . ')');
     } catch (Throwable $e) {
         b24_log("CRM {$request['crm_type']} {$request['crm_id']}: ошибка обновления: " . $e->getMessage());
     }
+}
+
+/* ---------------- Открытые линии: где работает бот ---------------- */
+
+/** id линии из entityId чата («коннектор|линия|чат|клиент»). */
+function b24_line_id(string $entityId): int
+{
+    return (int)(explode('|', $entityId)[1] ?? 0);
+}
+
+/** Линии, в которых бот включён (настраивается в админке → Битрикс24). */
+function b24_enabled_lines(): array
+{
+    return array_map('intval', json_decode(setting('b24_lines') ?: '[]', true) ?: []);
+}
+
+function b24_line_enabled(int $lineId): bool
+{
+    return in_array($lineId, b24_enabled_lines(), true);
+}
+
+/** Список линий портала с состоянием чат-бота в каждой. */
+function b24_lines_status(): array
+{
+    $router = (int)cfg('bitrix_router_bot_id', 0);
+    $out = [];
+    foreach (b24('imopenlines.config.list.get', [])['result'] ?? [] as $l) {
+        $id = (int)$l['ID'];
+        $cfg = $l;
+        if (!isset($cfg['WELCOME_BOT_ENABLE'])) {
+            try { $cfg = b24('imopenlines.config.get', ['CONFIG_ID' => $id])['result'] ?? $l; } catch (Throwable $e) {}
+        }
+        $botOn = ($cfg['WELCOME_BOT_ENABLE'] ?? 'N') === 'Y';
+        $botId = (int)($cfg['WELCOME_BOT_ID'] ?? 0);
+        $out[] = [
+            'id'       => $id,
+            'name'     => (string)($l['LINE_NAME'] ?? ''),
+            'active'   => ($l['ACTIVE'] ?? 'Y') === 'Y',
+            'b24_bot'  => $botOn ? ($router && $botId === $router ? 'ours' : 'other') : 'none',
+            'b24_bot_id' => $botId,
+            'enabled'  => b24_line_enabled($id),
+        ];
+    }
+    return $out;
+}
+
+/** Включить/выключить бота в линии: и в настройках линии Битрикс24, и в списке бота. */
+function b24_line_set(int $lineId, bool $on): void
+{
+    $router = (int)cfg('bitrix_router_bot_id', 0);
+    if ($on && !$router) throw new RuntimeException('Сначала зарегистрируйте ботов: php bin/bitrix-register.php');
+    $params = $on
+        ? ['WELCOME_BOT_ENABLE' => 'Y', 'WELCOME_BOT_ID' => $router, 'WELCOME_BOT_JOIN' => 'always', 'WELCOME_BOT_LEFT' => 'queue', 'WELCOME_BOT_TIME' => 60]
+        : ['WELCOME_BOT_ENABLE' => 'N'];
+    b24('imopenlines.config.update', ['CONFIG_ID' => $lineId, 'PARAMS' => $params]);
+    $lines = array_values(array_diff(b24_enabled_lines(), [$lineId]));
+    if ($on) $lines[] = $lineId;
+    set_setting('b24_lines', json_encode($lines));
+    b24_log("линия $lineId: бот " . ($on ? 'включён' : 'выключен') . ' (из админки)');
+}
+
+/** Пауза после реплики оператора, минут (админка, иначе config.php). */
+function b24_pause_min(): int
+{
+    $v = setting('b24_pause');
+    return $v !== '' ? max(0, (int)$v) : (int)cfg('bitrix_operator_pause_min', 10);
 }
 
 /**

@@ -75,12 +75,16 @@ if ($has('--check')) {
     }
     $say('API: ' . b24_api());
 
-    $say('Поля CRM (лиды):');
+    if (cfg('bitrix_crm_mode', 'comments') === 'fields') {
+$say('Поля CRM (лиды):');
     try {
         $r = b24('crm.lead.userfield.list', ['filter' => ['%FIELD_NAME' => 'VISA_']])['result'] ?? [];
         $have = array_column($r, 'FIELD_NAME');
         foreach (B24_LEAD_FIELDS as [$code, $label]) in_array('UF_CRM_' . $code, $have, true) ? $ok("UF_CRM_$code") : $bad("UF_CRM_$code — нет (php bin/bitrix-register.php --fields)");
     } catch (Throwable $e) { $bad($e->getMessage()); }
+} else {
+    $say('Лиды: сведения пишутся в «Комментарий» лида (bitrix_crm_mode = comments)');
+}
 
     $say('Линии:');
     try { foreach (b24('imopenlines.config.list.get', [])['result'] as $l) $ok("{$l['ID']}  {$l['LINE_NAME']}"); }
@@ -134,8 +138,10 @@ $r = register_bot('router', $c[1] === 'v1', $url, $name);
 if (!$r) { fwrite(STDERR, "Не удалось зарегистрировать приёмщика\n"); exit(1); }
 $say("  id {$r[0]} ({$r[1]})");
 
-$say("\nПоля «Виза: …» в лидах и сделках:");
-b24_install_fields($say);
+if (cfg('bitrix_crm_mode', 'comments') === 'fields') {
+    $say("\nПоля «Виза: …» в лидах и сделках:");
+    b24_install_fields($say);
+}
 
 echo <<<TXT
 
@@ -145,9 +151,8 @@ echo <<<TXT
     'bitrix_router_bot_id' => {$r[0]},
     'bitrix_api'           => '{$c[1]}',
 
-Затем в Битрикс24 для каждой линии: Контакт-центр → линия → Настройки → Чат-бот →
-  включить, бот «{$name} — приём обращений», подключать «сразу при первом обращении».
-  Приёмщик добавит консультанта в чат и сразу передаст диалог операторам — очередь работает как раньше.
+Затем откройте админку бота → вкладка «Битрикс24» и включите бота в нужных линиях
+  (бот сам пропишет «Приёмщика» в настройках линии; очередь операторов работает как раньше).
 
 Проверка: напишите в линию как клиент и выполните  php bin/bitrix-register.php --log
 
