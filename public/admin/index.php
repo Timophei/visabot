@@ -242,7 +242,11 @@ if (cfg('bitrix_webhook')) $tabs['bitrix'] = 'Битрикс24';
     <p class="hint">Портал: <?= h(b24_portal()) ?> ·
       <?= $b24err ? '<b class="bad">вебхук не отвечает: ' . h($b24err) . '</b>' : '<span class="good">вебхук работает</span>' ?> ·
       боты: <?= $botOk ? '<span class="good">Консультант #' . (int)cfg('bitrix_bot_id') . ', Приёмщик #' . (int)cfg('bitrix_router_bot_id') . ' (' . h(b24_api()) . ')</span>' : '<b class="bad">не зарегистрированы — php bin/bitrix-register.php</b>' ?> ·
-      лиды: <?= cfg('bitrix_crm_mode', 'comments') === 'fields' ? 'поля «Виза: …»' : 'текстом в комментарий' ?></p>
+      лиды: <?= cfg('bitrix_crm_mode', 'comments') === 'fields' ? 'поля «Виза: …»' : 'текстом в комментарий' ?> ·
+      события: <?php if (cfg('bitrix_event_mode', 'fetch') === 'webhook'): ?>Битрикс присылает на наш адрес<?php else:
+        $hb = @filemtime(cfg('data_dir', BOT_ROOT . '/data') . '/b24-poll.heartbeat');
+        echo $hb && time() - $hb < 30 ? '<span class="good">сборщик работает</span>' : '<b class="bad">сборщик не запущен' . ($hb ? ' (последний раз ' . date('d.m H:i', $hb) . ')' : '') . ' — sudo systemctl start visabot-b24</b>';
+      endif; ?></p>
     <form method="post" class="row-form">
       <input type="hidden" name="csrf" value="<?= csrf() ?>"><input type="hidden" name="do" value="b24_pause">
       <label>Бот молчит после реплики оператора, минут <input type="number" name="pause" min="0" max="1440" value="<?= b24_pause_min() ?>"></label>

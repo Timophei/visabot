@@ -22,4 +22,9 @@ find lib public bin -name '*.php' -print0 | xargs -0 -n1 php -l > /dev/null
 echo "→ Перезапуск PHP-FPM (сброс кеша OPcache)…"
 systemctl reload php8.3-fpm
 
+if systemctl is-enabled --quiet visabot-b24 2>/dev/null; then
+    echo "→ Перезапуск сборщика событий Битрикс24…"
+    systemctl restart visabot-b24
+fi
+
 echo "✓ Готово: $(git log -1 --format='%h %s')"

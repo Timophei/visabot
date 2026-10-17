@@ -42,6 +42,7 @@ return [
     'bitrix_router_bot_id' => 0,   // «Приёмщик» — чат-бот линии
     'bitrix_api'           => 'v2',
     'bitrix_operator_pause_min' => 10, // бот молчит N минут после реплики оператора (меняется и в админке)
+    'bitrix_event_mode' => 'fetch',    // fetch — наш сервер сам забирает события (служба visabot-b24); webhook — Битрикс шлёт их нам
     'bitrix_crm_mode'  => 'comments',  // 'comments' — сведения текстом в комментарий лида; 'fields' — в поля «Виза: …»
     'bitrix_transfer_queue_id'  => 0,  // 0 — обычная очередь этой линии; иначе id линии/очереди
 

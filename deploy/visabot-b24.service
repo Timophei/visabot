@@ -1,0 +1,19 @@
+# Служба: сборщик событий Битрикс24 для визового бота (режим fetch).
+# Установка:
+#   sudo cp /var/www/visa-bot/deploy/visabot-b24.service /etc/systemd/system/
+#   sudo systemctl daemon-reload && sudo systemctl enable --now visabot-b24
+# Журнал: sudo journalctl -u visabot-b24 -n 50     (а события — в админке → Битрикс24)
+[Unit]
+Description=Visa bot: Bitrix24 events poller
+After=network-online.target
+
+[Service]
+User=www-data
+Group=www-data
+WorkingDirectory=/var/www/visa-bot
+ExecStart=/usr/bin/php bin/bitrix-poll.php
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

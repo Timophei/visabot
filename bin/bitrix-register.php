@@ -8,6 +8,8 @@
 //   php bin/bitrix-register.php --chat 123       — проверить конкретный чат линии: привязку к CRM и добавление консультанта
 //   php bin/bitrix-register.php --lines          — список открытых линий (id для bitrix_transfer_queue_id)
 //   php bin/bitrix-register.php --log            — последние строки журнала интеграции
+//   php bin/bitrix-register.php --mode fetch     — переключить ботов: наш сервер сам забирает события (для коробок за фаерволом)
+//   php bin/bitrix-register.php --mode webhook   — переключить ботов: Битрикс шлёт события на наш адрес
 //
 // Перед запуском в config.php: bitrix_webhook, bitrix_bot_token, bitrix_secret, public_url.
 declare(strict_types=1);
@@ -33,6 +35,22 @@ foreach (['bitrix_webhook', 'bitrix_bot_token', 'bitrix_secret', 'public_url'] a
 }
 $url = rtrim((string)cfg('public_url'), '/') . '/bitrix.php?s=' . urlencode((string)cfg('bitrix_secret'));
 $name = (string)cfg('bitrix_bot_name', 'Визовый консультант');
+
+// Переключить уже зарегистрированных ботов между режимами доставки событий
+if ($has('--mode')) {
+    $mode = $args[array_search('--mode', $args, true) + 1] ?? '';
+    if (!in_array($mode, ['fetch', 'webhook'], true)) { fwrite(STDERR, "Укажите --mode fetch или --mode webhook\n"); exit(1); }
+    foreach (['consultant', 'router'] as $b) {
+        [$id, $t] = b24_bot($b);
+        if (!$id) { $bad("$b: не зарегистрирован"); continue; }
+        $fields = $mode === 'webhook' ? ['eventMode' => 'webhook', 'webhookUrl' => $url] : ['eventMode' => 'fetch'];
+        try { b24('imbot.v2.Bot.update', ['botId' => $id, 'botToken' => $t, 'fields' => $fields]); $ok("$b #$id: режим $mode"); }
+        catch (Throwable $e) { $bad("$b #$id: " . $e->getMessage()); }
+    }
+    $say("\nВпишите в config.php: 'bitrix_event_mode' => '$mode',");
+    if ($mode === 'fetch') $say("и запустите сборщик событий (см. deploy/visabot-b24.service).");
+    exit;
+}
 
 if ($has('--lines')) {
     foreach (b24('imopenlines.config.list.get', [])['result'] as $l) printf("%4s  %s\n", $l['ID'], $l['LINE_NAME']);
@@ -108,8 +126,9 @@ function register_bot(string $role, bool $v1, string $url, string $name): ?array
                 'botToken' => $token,
                 'type' => $isRouter ? 'openline' : 'supervisor',
                 'isSupportOpenline' => true,
-                'eventMode' => 'webhook',
-                'webhookUrl' => $url,
+                ...(cfg('bitrix_event_mode', 'fetch') === 'webhook'
+                    ? ['eventMode' => 'webhook', 'webhookUrl' => $url]
+                    : ['eventMode' => 'fetch']),
                 'properties' => ['name' => $title, 'workPosition' => $position],
             ]]);
             if ($id = $r['result']['bot']['id'] ?? null) return [(int)$id, 'v2'];
@@ -154,6 +173,7 @@ echo <<<TXT
 Затем откройте админку бота → вкладка «Битрикс24» и включите бота в нужных линиях
   (бот сам пропишет «Приёмщика» в настройках линии; очередь операторов работает как раньше).
 
+Режим событий: " . cfg('bitrix_event_mode', 'fetch') . " (fetch — запустите службу deploy/visabot-b24.service).
 Проверка: напишите в линию как клиент и выполните  php bin/bitrix-register.php --log
 
 TXT;

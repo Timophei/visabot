@@ -97,7 +97,13 @@ visabot/  (на сервере: /var/www/visa-bot)
    ```
    Впишите выданные `bitrix_bot_id`, `bitrix_router_bot_id`, `bitrix_api` в config.php. На старых коробках без `imbot.v2` скрипт сам переключится на старый API.
 4. Админка бота → «Битрикс24» → «Включить» у нужных линий (прописывает Приёмщика в настройках линии через API; вручную это *Контакт-центр → линия → Настройки → Чат-бот*).
-5. Проверка: напишите в линию как клиент, затем `php bin/bitrix-register.php --log`. Конкретный чат: `php bin/bitrix-register.php --chat <id чата>` — покажет привязку к лиду и попробует добавить консультанта.
+5. **Режим событий.** По умолчанию `bitrix_event_mode => 'fetch'`: наш сервер сам забирает события из Битрикса — входящий доступ от портала не нужен (коробка за фаерволом). Нужна служба-сборщик:
+   ```bash
+   sudo cp deploy/visabot-b24.service /etc/systemd/system/
+   sudo systemctl daemon-reload && sudo systemctl enable --now visabot-b24
+   ```
+   Уже зарегистрированных ботов переключить: `php bin/bitrix-register.php --mode fetch` (или `--mode webhook`, если портал может обращаться к серверу бота).
+6. Проверка: напишите в линию как клиент, затем `php bin/bitrix-register.php --log`. Конкретный чат: `php bin/bitrix-register.php --chat <id чата>` — покажет привязку к лиду и попробует добавить консультанта.
 
 ## Клиенты
 
