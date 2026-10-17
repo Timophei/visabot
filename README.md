@@ -73,14 +73,14 @@ sudo chown root:www-data config.php && sudo chmod 640 config.php
 sudo cp deploy/nginx-visa-bot.conf /etc/nginx/sites-available/visa-bot
 sudo ln -s /etc/nginx/sites-available/visa-bot /etc/nginx/sites-enabled/
 sudo nginx -t && sudo systemctl reload nginx
-sudo certbot --nginx -d visa.gorodchaya.ru
+sudo certbot --nginx -d visabot.b-integration.ru
 
 # 6. Лимит загрузки PDF через админку
 sudo sed -i 's/^upload_max_filesize.*/upload_max_filesize = 100M/; s/^post_max_size.*/post_max_size = 100M/' /etc/php/8.3/fpm/php.ini
 sudo systemctl reload php8.3-fpm
 ```
 
-Не забудьте добавить поддомен `visa` в DNS (A-запись на IP сервера).
+Домен `visabot.b-integration.ru` должен указывать A-записью на IP сервера.
 
 ## Обновление
 
@@ -94,7 +94,7 @@ sudo bash /var/www/visa-bot/deploy/update.sh
 
 ## Запуск
 
-1. Откройте `https://visa.gorodchaya.ru/admin/`, войдите.
+1. Откройте `https://visabot.b-integration.ru/admin/`, войдите.
 2. **Промт** — подставьте название компании, поправьте стиль.
 3. **Данные компании** — страны, цены, сроки, контакты, условия. Это главный источник.
 4. **Учебники (PDF)** — загрузите файлы. Большие (100+ страниц) удобнее из консоли:
@@ -102,12 +102,12 @@ sudo bash /var/www/visa-bot/deploy/update.sh
 5. **Проверка** — задайте вопрос, посмотрите, какие фрагменты найдены и что ответил бот.
 6. Виджет на сайт визового центра (и добавьте этот сайт в `allowed_origins`):
    ```html
-   <script src="https://visa.gorodchaya.ru/widget.js" data-title="Визовый консультант" data-color="#1f4e8c" defer></script>
+   <script src="https://visabot.b-integration.ru/widget.js" data-title="Визовый консультант" data-color="#1f4e8c" defer></script>
    ```
 7. Telegram: создайте бота у @BotFather, токен — в config.php, затем:
    ```bash
    curl "https://api.telegram.org/bot<ТОКЕН>/setWebhook" \
-     -d "url=https://visa.gorodchaya.ru/telegram.php" \
+     -d "url=https://visabot.b-integration.ru/telegram.php" \
      -d "secret_token=<telegram_secret из config.php>"
    ```
    Команды `/start` и `/new` начинают диалог заново.

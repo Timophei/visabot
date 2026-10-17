@@ -1,7 +1,7 @@
 /*
  * Виджет консультанта визового центра.
  * Подключение на сайте:
- *   <script src="https://visa.gorodchaya.ru/widget.js" data-title="Визовый консультант" data-color="#1f4e8c" defer></script>
+ *   <script src="https://visabot.b-integration.ru/widget.js" data-title="Визовый консультант" data-color="#1f4e8c" defer></script>
  */
 (function () {
   'use strict';
