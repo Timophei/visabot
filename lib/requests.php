@@ -131,9 +131,20 @@ function update_request(int $id, array $data, bool $replaceAll = false): array
     return array_values(array_intersect(array_keys($set), array_keys(REQUEST_FIELDS)));
 }
 
-function client_has_contact(array $c): bool
+/** Есть ли как связаться с клиентом. В Telegram и открытой линии Битрикс24 — сам чат и есть канал связи. */
+function client_has_contact(array $c, string $channel = ''): bool
 {
-    return $c['phone'] !== '' || $c['messenger_contact'] !== '' || !empty($c['tg_id']);
+    return $c['phone'] !== '' || $c['messenger_contact'] !== '' || !empty($c['tg_id']) || $channel === 'bitrix';
+}
+
+const CHANNEL_NAMES = ['web' => 'сайт', 'telegram' => 'Telegram', 'bitrix' => 'открытая линия Битрикс24', 'admin' => 'проверка'];
+
+/** id запроса, переданного менеджеру в текущем ответе (чтобы канал мог, например, позвать оператора). */
+function last_submitted_request(?int $set = null): ?int
+{
+    static $id = null;
+    if ($set !== null) $id = $set ?: null;
+    return $id;
 }
 
 /** Блок для промта: что уже собрано по запросу и чего не хватает. */
@@ -169,7 +180,7 @@ function request_message(array $r, array $c, string $title, array $changed = [])
         $lines[] = "<b>$label:</b> " . $h($r[$f]) . $mark;
     }
     $lines[] = '';
-    $lines[] = 'Канал: ' . ($r['channel'] === 'telegram' ? 'Telegram' : ($r['channel'] === 'web' ? 'сайт' : $r['channel']));
+    $lines[] = 'Канал: ' . (CHANNEL_NAMES[$r['channel']] ?? $r['channel']);
     $url = rtrim((string)cfg('public_url', ''), '/');
     if ($url !== '') $lines[] = $url . '/admin/?tab=requests&id=' . $r['id'];
     return implode("\n", $lines);
@@ -211,9 +222,10 @@ function process_request(int $clientId, int $dialogId, string $channel, array $d
     $r = get_request((int)$r['id']);
     $client = get_client($clientId);
 
-    if ($r['status'] === 'draft' && $r['ready'] && client_has_contact($client)) {
+    if ($r['status'] === 'draft' && $r['ready'] && client_has_contact($client, $channel)) {
         update_request((int)$r['id'], ['status' => 'new']);
         $r = get_request((int)$r['id']);
+        last_submitted_request((int)$r['id']);
         if ($channel !== 'admin') notify_managers(request_message($r, $client, '🆕 Новый запрос'));
     } elseif (in_array($r['status'], ['new', 'in_work'], true) && $changed && $channel !== 'admin') {
         notify_managers(request_message($r, $client, '✏️ Дополнение к запросу', $changed));

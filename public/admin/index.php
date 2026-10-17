@@ -120,7 +120,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
 $docs = db()->query('SELECT * FROM documents ORDER BY id DESC')->fetchAll();
 $tabs = ['requests' => 'Запросы', 'clients' => 'Клиенты', 'prompt' => 'Промт', 'company' => 'Данные компании', 'docs' => 'Материалы', 'test' => 'Проверка'];
-$channelName = ['web' => 'сайт', 'telegram' => 'Telegram', 'admin' => 'проверка'];
+$channelName = CHANNEL_NAMES;
 ?><!doctype html>
 <html lang="ru"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <title>Админка — визовый бот</title><link rel="stylesheet" href="admin.css">

@@ -31,6 +31,17 @@ return [
     'manager_chat_ids' => [],
     'public_url'       => 'https://visabot.b-integration.ru', // для ссылки на запрос в уведомлении
 
+    // --- Битрикс24: бот в открытой линии ---
+    // Входящий вебхук портала с правами imbot, imopenlines, im (Разработчикам → Другое → Входящий вебхук)
+    'bitrix_webhook'   => '',      // https://ваш-портал.bitrix24.ru/rest/1/xxxxxxxxxxxx/
+    'bitrix_bot_token' => '',      // придумайте строку до 40 символов (ключ бота)
+    'bitrix_secret'    => '',      // придумайте длинную строку — защищает адрес обработчика
+    'bitrix_bot_id'    => 0,       // выдаст php bin/bitrix-register.php
+    'bitrix_bot_name'  => 'Визовый консультант',
+    'bitrix_send_greeting'      => true,  // приветствие при новом обращении (выключите, если в линии своё)
+    'bitrix_transfer_on_request'=> true,  // передать диалог оператору, когда запрос готов
+    'bitrix_transfer_queue_id'  => 0,     // 0 — свободному оператору этой линии; иначе id линии/очереди
+
     // --- Сайт и виджет ---
     'site_title'       => 'Визовый консультант',
     'accent_color'     => '#1f4e8c',
