@@ -51,23 +51,29 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 back($_POST['tab'] ?? 'prompt', 'Сохранено. Бот уже отвечает по новой версии.');
             case 'upload':
                 set_time_limit(0);
-                $f = $_FILES['pdf'] ?? null;
+                $f = $_FILES['file'] ?? null;
                 if (!$f || $f['error'] !== UPLOAD_ERR_OK) throw new RuntimeException('Файл не загрузился (код ' . ($f['error'] ?? '?') . '). Проверьте лимиты upload_max_filesize / client_max_body_size.');
-                if (strtolower(pathinfo($f['name'], PATHINFO_EXTENSION)) !== 'pdf') throw new RuntimeException('Нужен PDF.');
-                $dir = cfg('data_dir') . '/pdf';
+                $ext = strtolower(pathinfo($f['name'], PATHINFO_EXTENSION));
+                if (!in_array($ext, SUPPORTED_EXT, true)) throw new RuntimeException("Формат .$ext не поддерживается. Можно: " . implode(', ', SUPPORTED_EXT));
+                $dir = cfg('data_dir') . '/files';
                 if (!is_dir($dir)) mkdir($dir, 0770, true);
-                $dest = $dir . '/' . date('Ymd_His') . '_' . bin2hex(random_bytes(3)) . '.pdf';
+                $dest = $dir . '/' . date('Ymd_His') . '_' . bin2hex(random_bytes(3)) . '.' . $ext;
                 move_uploaded_file($f['tmp_name'], $dest);
                 $title = trim((string)($_POST['title'] ?? '')) ?: pathinfo($f['name'], PATHINFO_FILENAME);
                 $info = '';
-                index_pdf($dest, $title, function ($m) use (&$info) { $info = $m; });
+                try {
+                    index_file($dest, $f['name'], $title, (string)($_POST['trust'] ?? 'main'), function ($m) use (&$info) { $info = $m; });
+                } catch (Throwable $e) { @unlink($dest); throw $e; }
                 back('docs', "«{$title}» проиндексирован: {$info}.");
             case 'toggle':
                 db()->prepare('UPDATE documents SET active = 1 - active WHERE id = ?')->execute([(int)$_POST['id']]);
                 back('docs');
+            case 'trust':
+                db()->prepare("UPDATE documents SET trust = CASE trust WHEN 'aux' THEN 'main' ELSE 'aux' END WHERE id = ?")->execute([(int)$_POST['id']]);
+                back('docs');
             case 'delete':
                 $st = db()->prepare('SELECT filename FROM documents WHERE id = ?'); $st->execute([(int)$_POST['id']]);
-                if ($fn = $st->fetchColumn()) @unlink(cfg('data_dir') . '/pdf/' . basename($fn));
+                if ($fn = $st->fetchColumn()) { @unlink(cfg('data_dir') . '/files/' . basename($fn)); @unlink(cfg('data_dir') . '/pdf/' . basename($fn)); }
                 delete_document((int)$_POST['id']);
                 back('docs', 'Удалено.');
             case 'test':
@@ -106,7 +112,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 }
 
 $docs = db()->query('SELECT * FROM documents ORDER BY id DESC')->fetchAll();
-$tabs = ['clients' => 'Клиенты', 'prompt' => 'Промт', 'company' => 'Данные компании', 'docs' => 'Учебники (PDF)', 'test' => 'Проверка'];
+$tabs = ['clients' => 'Клиенты', 'prompt' => 'Промт', 'company' => 'Данные компании', 'docs' => 'Материалы', 'test' => 'Проверка'];
 $channelName = ['web' => 'сайт', 'telegram' => 'Telegram', 'admin' => 'проверка'];
 ?><!doctype html>
 <html lang="ru"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
@@ -123,7 +129,7 @@ $channelName = ['web' => 'сайт', 'telegram' => 'Telegram', 'admin' => 'пр�
   <form method="post" class="card">
     <input type="hidden" name="csrf" value="<?= csrf() ?>"><input type="hidden" name="do" value="save_settings"><input type="hidden" name="tab" value="prompt">
     <h2>Промт — роль и правила бота</h2>
-    <p class="hint">Главная инструкция. Всё, что найдено в учебниках, подчиняется этому промту и данным компании.</p>
+    <p class="hint">Главная инструкция. Всё, что найдено в материалах, подчиняется этому промту и данным компании.</p>
     <textarea name="system_prompt" rows="22"><?= h(setting('system_prompt')) ?></textarea>
     <h2>Приветствие</h2>
     <textarea name="greeting" rows="3"><?= h(setting('greeting')) ?></textarea>
@@ -134,7 +140,7 @@ $channelName = ['web' => 'сайт', 'telegram' => 'Telegram', 'admin' => 'пр�
   <form method="post" class="card">
     <input type="hidden" name="csrf" value="<?= csrf() ?>"><input type="hidden" name="do" value="save_settings"><input type="hidden" name="tab" value="company">
     <h2>Данные компании</h2>
-    <p class="hint">Цены, сроки, страны, контакты, условия. Отправляются в каждом запросе и важнее учебников: если в PDF другие цифры, бот назовёт эти. Держите текст компактным — до 2–3 страниц.</p>
+    <p class="hint">Цены, сроки, страны, контакты, условия. Отправляются в каждом запросе и важнее материалов: если в них другие цифры, бот назовёт эти. Держите текст компактным — до 2–3 страниц.</p>
     <textarea name="company_data" rows="28"><?= h(setting('company_data')) ?></textarea>
     <p class="hint">≈ <?= number_format(mb_strlen(setting('company_data'))) ?> символов</p>
     <button>Сохранить</button>
@@ -143,23 +149,37 @@ $channelName = ['web' => 'сайт', 'telegram' => 'Telegram', 'admin' => 'пр�
 <?php elseif ($tab === 'docs'): ?>
   <form method="post" enctype="multipart/form-data" class="card" onsubmit="this.querySelector('button').disabled=true;this.querySelector('button').textContent='Индексирую… не закрывайте страницу'">
     <input type="hidden" name="csrf" value="<?= csrf() ?>"><input type="hidden" name="do" value="upload">
-    <h2>Загрузить учебник</h2>
-    <p class="hint">PDF разбирается один раз: текст режется на фрагменты и индексируется. В запросы к нейросети попадают только фрагменты, подходящие к вопросу. Сканы без текстового слоя нужно сначала распознать.</p>
-    <label>Название (как бот будет понимать источник)<input name="title" placeholder="Напр.: Шенген — требования к документам, 2026"></label>
-    <label>PDF-файл<input type="file" name="pdf" accept="application/pdf" required></label>
+    <h2>Загрузить материал</h2>
+    <p class="hint">Файл разбирается один раз: текст режется на фрагменты и индексируется. В запросы к нейросети попадают только фрагменты, подходящие к вопросу.</p>
+    <ul class="hint formats">
+      <li><b>PDF, Word (.docx), TXT, Markdown</b> — учебники, регламенты, инструкции. Сканы PDF без текста нужно сначала распознать.</li>
+      <li><b>HTML</b> — сохранённые страницы сайтов и баз знаний.</li>
+      <li><b>JSON / JSONL</b> — пары «вопрос–ответ», выгрузки чатов ChatGPT/Claude, любые структуры.</li>
+      <li><b>Excel (.xlsx), CSV</b> — таблицы: каждая строка читается как «Колонка: значение».</li>
+      <li><b>ZIP</b> — архив с любыми файлами выше, например выгрузка базы знаний Битрикс24 целиком.</li>
+    </ul>
+    <label>Название (как бот будет понимать источник)<input name="title" placeholder="Напр.: База знаний Битрикс24, октябрь 2026"></label>
+    <label>Файл<input type="file" name="file" accept=".<?= implode(',.', SUPPORTED_EXT) ?>" required></label>
+    <label>Насколько доверять
+      <select name="trust">
+        <option value="main">Проверенный — учебники, база знаний компании, регламенты</option>
+        <option value="aux">Вспомогательный — ответы других нейросетей, черновики, непроверенное</option>
+      </select>
+    </label>
     <button>Загрузить и проиндексировать</button>
   </form>
   <div class="card">
-    <h2>Учебники в базе</h2>
+    <h2>Материалы в базе</h2>
     <?php if (!$docs): ?><p class="hint">Пока пусто.</p><?php else: ?>
-    <table><tr><th>Название</th><th>Стр.</th><th>Фрагм.</th><th>Поиск</th><th>Добавлен</th><th></th></tr>
+    <table><tr><th>Название</th><th>Формат</th><th>Разделов</th><th>Фрагм.</th><th>Доверие</th><th>Добавлен</th><th></th></tr>
     <?php foreach ($docs as $d): ?>
       <tr class="<?= $d['active'] ? '' : 'off' ?>">
-        <td><?= h($d['title']) ?></td><td><?= $d['pages'] ?></td><td><?= $d['chunks'] ?></td>
-        <td><?= $d['has_embeddings'] ? 'смысловой + текст' : 'текстовый' ?></td><td><?= h($d['created_at']) ?></td>
+        <td><?= h($d['title']) ?></td><td><?= h(strtoupper($d['format'])) ?></td><td><?= $d['pages'] ?></td><td><?= $d['chunks'] ?></td>
+        <td><?= $d['trust'] === 'aux' ? 'вспомогательный' : 'проверенный' ?></td><td class="nw"><?= h($d['created_at']) ?></td>
         <td class="act">
           <form method="post"><input type="hidden" name="csrf" value="<?= csrf() ?>"><input type="hidden" name="do" value="toggle"><input type="hidden" name="id" value="<?= $d['id'] ?>"><button class="sec"><?= $d['active'] ? 'Выключить' : 'Включить' ?></button></form>
-          <form method="post" onsubmit="return confirm('Удалить учебник из базы?')"><input type="hidden" name="csrf" value="<?= csrf() ?>"><input type="hidden" name="do" value="delete"><input type="hidden" name="id" value="<?= $d['id'] ?>"><button class="danger">Удалить</button></form>
+          <form method="post"><input type="hidden" name="csrf" value="<?= csrf() ?>"><input type="hidden" name="do" value="trust"><input type="hidden" name="id" value="<?= $d['id'] ?>"><button class="sec"><?= $d['trust'] === 'aux' ? 'Сделать проверенным' : 'Сделать вспомогат.' ?></button></form>
+          <form method="post" onsubmit="return confirm('Удалить материал из базы?')"><input type="hidden" name="csrf" value="<?= csrf() ?>"><input type="hidden" name="do" value="delete"><input type="hidden" name="id" value="<?= $d['id'] ?>"><button class="danger">Удалить</button></form>
         </td>
       </tr>
     <?php endforeach; ?></table><?php endif; ?>
@@ -169,7 +189,7 @@ $channelName = ['web' => 'сайт', 'telegram' => 'Telegram', 'admin' => 'пр�
   <form method="post" class="card">
     <input type="hidden" name="csrf" value="<?= csrf() ?>"><input type="hidden" name="do" value="test">
     <h2>Проверка</h2>
-    <p class="hint">Покажет, какие фрагменты учебников бот найдёт под вопрос. С галочкой — ещё и ответ бота (тестовый диалог помнит контекст).</p>
+    <p class="hint">Покажет, какие фрагменты материалов бот найдёт под вопрос. С галочкой — ещё и ответ бота (тестовый диалог помнит контекст).</p>
     <textarea name="q" rows="3" required placeholder="Какие документы нужны на туристическую визу в Испанию?"><?= h($test['q'] ?? '') ?></textarea>
     <label class="row"><input type="checkbox" name="with_answer" value="1" checked> Получить ответ бота</label>
     <button>Проверить</button>
@@ -185,7 +205,7 @@ $channelName = ['web' => 'сайт', 'telegram' => 'Telegram', 'admin' => 'пр�
     <?php endif; ?>
     <div class="card"><h2>Найденные фрагменты (<?= count($test['chunks'] ?? []) ?>)</h2>
       <?php foreach ($test['chunks'] ?? [] as $i => $c): ?>
-        <details><summary>[<?= $i + 1 ?>] <?= h($c['title']) ?>, стр. <?= $c['page'] ?></summary><pre><?= h($c['text']) ?></pre></details>
+        <details><summary>[<?= $i + 1 ?>] <?= h(chunk_label($c)) ?><?= $c['trust'] === 'aux' ? ' · вспомогательный' : '' ?></summary><pre><?= h($c['text']) ?></pre></details>
       <?php endforeach; ?>
     </div>
   <?php endif; ?>
