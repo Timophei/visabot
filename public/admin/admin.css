@@ -1,0 +1,37 @@
+:root{--c:#1f4e8c;--bg:#f3f5f9;--line:#dde3ec;--muted:#6b7587}
+*{box-sizing:border-box}
+body{margin:0;font:15px/1.5 system-ui,-apple-system,Segoe UI,Roboto,sans-serif;background:var(--bg);color:#1d2330}
+header{display:flex;gap:20px;align-items:center;flex-wrap:wrap;padding:12px 20px;background:var(--c);color:#fff}
+header nav{display:flex;gap:4px;flex-wrap:wrap;flex:1}
+header a{color:#fff;text-decoration:none;padding:6px 12px;border-radius:8px;opacity:.85}
+header a.on,header a:hover{background:rgba(255,255,255,.18);opacity:1}
+main{max-width:1000px;margin:0 auto;padding:20px 16px 60px}
+.card{background:#fff;border:1px solid var(--line);border-radius:12px;padding:18px 20px;margin-bottom:16px}
+h1,h2{margin:0 0 8px;font-size:18px}
+.hint{color:var(--muted);margin:0 0 12px;font-size:14px}
+textarea,input[type=text],input[type=password],input:not([type]){width:100%;border:1px solid #cad2de;border-radius:8px;padding:10px;font:14px/1.5 ui-monospace,Menlo,Consolas,monospace}
+input[type=password],input:not([type]){font-family:inherit}
+label{display:block;margin:0 0 12px;font-weight:500}
+label input{margin-top:4px;font-weight:400}
+label.row{display:flex;gap:8px;align-items:center;font-weight:400}
+label.row input{width:auto;margin:0}
+button{background:var(--c);color:#fff;border:0;border-radius:8px;padding:9px 16px;font:inherit;cursor:pointer;margin-top:8px}
+button:disabled{opacity:.6}
+button.sec{background:#e8edf5;color:#1d2330}
+button.danger{background:#fbe9e9;color:#a32020}
+table{width:100%;border-collapse:collapse;font-size:14px}
+th,td{text-align:left;padding:8px 6px;border-bottom:1px solid var(--line);vertical-align:top}
+tr.off td{opacity:.5}
+td.act{display:flex;gap:6px}td.act button{margin:0;padding:5px 10px;font-size:13px}
+td.nw{white-space:nowrap;color:var(--muted);font-size:13px}
+td.assistant{background:#f7f9fc}
+.ok,.err{padding:10px 14px;border-radius:8px}
+.ok{background:#e6f4ea;color:#1e5e2f}.err{background:#fbe9e9;color:#a32020}
+details{border-top:1px solid var(--line);padding:8px 0}
+summary{cursor:pointer;font-weight:500}
+pre{white-space:pre-wrap;font-size:13px;background:#f7f9fc;padding:10px;border-radius:8px}
+.answer{white-space:normal}
+form.inline{margin:-8px 0 16px}
+body.login{display:grid;place-items:center;min-height:100vh}
+body.login .card{width:min(360px,calc(100vw - 32px))}
+@media (max-width:640px){td.act{flex-direction:column}}
