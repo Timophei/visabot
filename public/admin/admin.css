@@ -35,3 +35,19 @@ form.inline{margin:-8px 0 16px}
 body.login{display:grid;place-items:center;min-height:100vh}
 body.login .card{width:min(360px,calc(100vw - 32px))}
 @media (max-width:640px){td.act{flex-direction:column}}
+/* клиенты */
+select{width:100%;border:1px solid #cad2de;border-radius:8px;padding:9px;font:inherit;margin-top:4px;background:#fff}
+.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:0 16px}
+form.search{display:flex;gap:8px;align-items:center;padding:12px}
+form.search input{flex:1;font-family:inherit}
+form.search button{margin:0}
+table.clients tr:not(:first-child){cursor:pointer}
+table.clients tr:not(:first-child):hover td{background:#f7f9fc}
+table.clients a{color:var(--c);text-decoration:none;font-weight:500}
+details.dialog{padding:12px 16px}
+details.dialog summary{font-weight:500}
+.chatlog{display:flex;flex-direction:column;gap:8px;margin-top:12px}
+.msg{max-width:85%;padding:8px 12px;border-radius:12px;font-size:14px}
+.msg small{display:block;color:var(--muted);font-size:12px;margin-bottom:2px}
+.msg.user{align-self:flex-end;background:#e8eef8}
+.msg.assistant{align-self:flex-start;background:#f4f6fa;border:1px solid var(--line)}

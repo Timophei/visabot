@@ -35,7 +35,7 @@ if (empty($_SESSION['ok'])) {
 }
 
 /* ---------- действия ---------- */
-$tab = $_GET['tab'] ?? 'prompt';
+$tab = $_GET['tab'] ?? 'clients';
 $flash = $_SESSION['flash'] ?? ''; unset($_SESSION['flash']);
 $test = null;
 
@@ -74,11 +74,30 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 $tab = 'test';
                 $q = trim((string)$_POST['q']);
                 $test = ['q' => $q, 'chunks' => retrieve($q)];
-                if (!empty($_POST['with_answer'])) $test['answer'] = answer('admin-test:' . session_id(), 'admin', $q);
+                if (!empty($_POST['with_answer'])) {
+                    $tc = client_by_key('admin:test');
+                    $test['answer'] = answer((int)$tc['id'], current_dialog((int)$tc['id'], 'admin'), 'admin', $q);
+                    $test['client'] = get_client((int)$tc['id']);
+                }
                 break;
             case 'reset_test':
-                reset_session('admin-test:' . session_id());
-                back('test', 'История тестового диалога очищена.');
+                delete_client((int)client_by_key('admin:test')['id']);
+                back('test', 'Тестовый диалог и тестовый клиент очищены.');
+            case 'save_client':
+                $id = (int)$_POST['id'];
+                $fields = array_intersect_key($_POST, array_flip(CLIENT_FIELDS));
+                $client = get_client($id);
+                // Ручная правка: разрешаем и очищать поля
+                foreach (CLIENT_FIELDS as $f) {
+                    if (isset($fields[$f]) && trim((string)$fields[$f]) === '' && $client[$f] !== '') {
+                        db()->prepare("UPDATE clients SET $f = '' WHERE id = ?")->execute([$id]);
+                    }
+                }
+                update_client($id, $fields + ['notes' => str_replace("\r\n", "\n", (string)($_POST['notes'] ?? ''))]);
+                header('Location: ?tab=clients&id=' . $id); $_SESSION['flash'] = 'Карточка сохранена.'; exit;
+            case 'delete_client':
+                delete_client((int)$_POST['id']);
+                back('clients', 'Клиент и все его диалоги удалены.');
         }
     } catch (Throwable $e) {
         if ($do === 'test') { $test['error'] = $e->getMessage(); }
@@ -87,7 +106,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 }
 
 $docs = db()->query('SELECT * FROM documents ORDER BY id DESC')->fetchAll();
-$tabs = ['prompt' => 'Промт', 'company' => 'Данные компании', 'docs' => 'Учебники (PDF)', 'test' => 'Проверка', 'log' => 'Диалоги'];
+$tabs = ['clients' => 'Клиенты', 'prompt' => 'Промт', 'company' => 'Данные компании', 'docs' => 'Учебники (PDF)', 'test' => 'Проверка'];
+$channelName = ['web' => 'сайт', 'telegram' => 'Telegram', 'admin' => 'проверка'];
 ?><!doctype html>
 <html lang="ru"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <title>Админка — визовый бот</title><link rel="stylesheet" href="admin.css">
@@ -158,6 +178,11 @@ $tabs = ['prompt' => 'Промт', 'company' => 'Данные компании',
   <?php if ($test): ?>
     <?php if (!empty($test['error'])): ?><p class="err"><?= h($test['error']) ?></p><?php endif; ?>
     <?php if (isset($test['answer'])): ?><div class="card"><h2>Ответ бота</h2><div class="answer"><?= nl2br(h($test['answer'])) ?></div></div><?php endif; ?>
+    <?php if (isset($test['client'])): $tc = $test['client']; ?>
+      <div class="card"><h2>Что бот узнал о тестовом клиенте</h2>
+        <p class="hint">Имя: <?= h($tc['first_name'] ?: '—') ?> · Фамилия: <?= h($tc['last_name'] ?: '—') ?> · Телефон: <?= h($tc['phone'] ?: '—') ?> · Мессенджер: <?= h($tc['messenger'] ? (MESSENGERS[$tc['messenger']] ?? $tc['messenger']) . ' ' . $tc['messenger_contact'] : '—') ?></p>
+      </div>
+    <?php endif; ?>
     <div class="card"><h2>Найденные фрагменты (<?= count($test['chunks'] ?? []) ?>)</h2>
       <?php foreach ($test['chunks'] ?? [] as $i => $c): ?>
         <details><summary>[<?= $i + 1 ?>] <?= h($c['title']) ?>, стр. <?= $c['page'] ?></summary><pre><?= h($c['text']) ?></pre></details>
@@ -165,14 +190,59 @@ $tabs = ['prompt' => 'Промт', 'company' => 'Данные компании',
     </div>
   <?php endif; ?>
 
-<?php elseif ($tab === 'log'): ?>
-  <div class="card"><h2>Последние сообщения</h2>
-  <?php $rows = db()->query("SELECT * FROM messages WHERE channel != 'admin' ORDER BY id DESC LIMIT 200")->fetchAll(); ?>
-  <?php if (!$rows): ?><p class="hint">Пока нет диалогов.</p><?php endif; ?>
-  <table><?php foreach ($rows as $r): ?>
-    <tr><td class="nw"><?= h($r['created_at']) ?><br><small><?= h($r['channel']) ?> · <?= h(substr($r['session'], -6)) ?></small></td>
-    <td class="<?= $r['role'] ?>"><b><?= $r['role'] === 'user' ? 'Клиент' : 'Бот' ?>:</b> <?= nl2br(h($r['content'])) ?></td></tr>
-  <?php endforeach; ?></table></div>
+<?php elseif ($tab === 'clients' && isset($_GET['id']) && ($c = get_client((int)$_GET['id']))): ?>
+  <p><a href="?tab=clients">← Все клиенты</a></p>
+  <form method="post" class="card">
+    <input type="hidden" name="csrf" value="<?= csrf() ?>"><input type="hidden" name="do" value="save_client"><input type="hidden" name="id" value="<?= $c['id'] ?>">
+    <h2><?= h(client_display_name($c)) ?></h2>
+    <p class="hint">Создан <?= h($c['created_at']) ?> · последний визит <?= h($c['last_seen_at']) ?><?= $c['tg_id'] ? ' · Telegram id ' . h((string)$c['tg_id']) . ($c['tg_username'] ? ' (<a href="https://t.me/' . h($c['tg_username']) . '" target="_blank">@' . h($c['tg_username']) . '</a>)' : '') : '' ?></p>
+    <div class="grid">
+      <label>Имя<input name="first_name" value="<?= h($c['first_name']) ?>"></label>
+      <label>Фамилия<input name="last_name" value="<?= h($c['last_name']) ?>"></label>
+      <label>Телефон<input name="phone" value="<?= h($c['phone']) ?>"><?php if ($c['phone']): ?> <a href="tel:<?= h($c['phone']) ?>">позвонить</a><?php endif; ?></label>
+      <label>Мессенджер<select name="messenger"><option value="">—</option><?php foreach (MESSENGERS as $k => $v): ?><option value="<?= $k ?>" <?= $c['messenger'] === $k ? 'selected' : '' ?>><?= $v ?></option><?php endforeach; ?></select></label>
+      <label>Контакт в мессенджере<input name="messenger_contact" value="<?= h($c['messenger_contact']) ?>" placeholder="@username или номер"></label>
+    </div>
+    <label>Заметки менеджера<textarea name="notes" rows="3"><?= h($c['notes']) ?></textarea></label>
+    <button>Сохранить</button>
+  </form>
+  <form method="post" class="inline" onsubmit="return confirm('Удалить клиента и все его диалоги? Это нельзя отменить.')">
+    <input type="hidden" name="csrf" value="<?= csrf() ?>"><input type="hidden" name="do" value="delete_client"><input type="hidden" name="id" value="<?= $c['id'] ?>"><button class="danger">Удалить клиента и переписку</button>
+  </form>
+  <?php $dialogs = client_dialogs((int)$c['id']); ?>
+  <?php if (!$dialogs): ?><p class="hint">Диалогов нет.</p><?php endif; ?>
+  <?php foreach ($dialogs as $i => $d): ?>
+    <details class="card dialog" <?= $i === 0 ? 'open' : '' ?>>
+      <summary>Диалог #<?= $d['id'] ?> · <?= h($channelName[$d['channel']] ?? $d['channel']) ?> · <?= h($d['started_at']) ?> — <?= h($d['last_at']) ?> · <?= (int)$d['messages'] ?> сообщ.</summary>
+      <div class="chatlog"><?php foreach (dialog_messages((int)$d['id']) as $m): ?>
+        <div class="msg <?= $m['role'] ?>"><small><?= $m['role'] === 'user' ? 'Клиент' : 'Бот' ?> · <?= h($m['created_at']) ?></small><?= nl2br(h($m['content'])) ?></div>
+      <?php endforeach; ?></div>
+    </details>
+  <?php endforeach; ?>
+
+<?php elseif ($tab === 'clients'): ?>
+  <?php $q = trim((string)($_GET['q'] ?? '')); $clients = list_clients($q); ?>
+  <form method="get" class="card search">
+    <input type="hidden" name="tab" value="clients">
+    <input name="q" value="<?= h($q) ?>" placeholder="Поиск: имя, телефон, @ник, заметки">
+    <button>Найти</button>
+  </form>
+  <div class="card">
+    <h2>Клиенты<?= $q !== '' ? ' — поиск' : '' ?> (<?= count($clients) ?>)</h2>
+    <?php if (!$clients): ?><p class="hint">Пока никого. Клиент появляется после первого сообщения на сайте или в Telegram.</p><?php else: ?>
+    <table class="clients">
+      <tr><th>Клиент</th><th>Телефон</th><th>Мессенджер</th><th>Диалогов</th><th>Последний визит</th></tr>
+      <?php foreach ($clients as $c): ?>
+        <tr onclick="location='?tab=clients&id=<?= $c['id'] ?>'">
+          <td><a href="?tab=clients&id=<?= $c['id'] ?>"><?= h(client_display_name($c)) ?></a></td>
+          <td class="nw"><?= h($c['phone'] ?: '—') ?></td>
+          <td><?= h($c['messenger'] ? (MESSENGERS[$c['messenger']] ?? $c['messenger']) . ' ' . $c['messenger_contact'] : '—') ?></td>
+          <td><?= (int)$c['dialogs_count'] ?> / <?= (int)$c['messages_count'] ?> сообщ.</td>
+          <td class="nw"><?= h($c['last_seen_at']) ?></td>
+        </tr>
+      <?php endforeach; ?>
+    </table><?php endif; ?>
+  </div>
 <?php endif; ?>
 </main>
 </body></html>
