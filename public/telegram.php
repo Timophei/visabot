@@ -10,7 +10,15 @@ if (!cfg('telegram_token') || !hash_equals((string)cfg('telegram_secret'), $secr
 
 $update = json_decode(file_get_contents('php://input') ?: '', true) ?: [];
 $msg = $update['message'] ?? null;
-if (!$msg || !isset($msg['chat']['id'], $msg['from']['id']) || ($msg['chat']['type'] ?? '') !== 'private') { echo 'ok'; exit; }
+if (!$msg || !isset($msg['chat']['id'], $msg['from']['id'])) { echo 'ok'; exit; }
+
+// /id — узнать id чата (для manager_chat_ids), работает и в группах
+if (preg_match('#^/id(@\w+)?$#', trim((string)($msg['text'] ?? '')))) {
+    echo 'ok';
+    tg_api('sendMessage', ['chat_id' => $msg['chat']['id'], 'text' => 'id этого чата: ' . $msg['chat']['id'] . "\nВпишите его в manager_chat_ids в config.php, чтобы сюда приходили запросы клиентов."]);
+    exit;
+}
+if (($msg['chat']['type'] ?? '') !== 'private') { echo 'ok'; exit; } // в группах бот клиентам не отвечает
 
 // Отвечаем Telegram сразу, чтобы он не слал повторы, а дальше работаем
 http_response_code(200);

@@ -35,7 +35,7 @@ if (empty($_SESSION['ok'])) {
 }
 
 /* ---------- действия ---------- */
-$tab = $_GET['tab'] ?? 'clients';
+$tab = $_GET['tab'] ?? 'requests';
 $flash = $_SESSION['flash'] ?? ''; unset($_SESSION['flash']);
 $test = null;
 
@@ -101,6 +101,13 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 }
                 update_client($id, $fields + ['notes' => str_replace("\r\n", "\n", (string)($_POST['notes'] ?? ''))]);
                 header('Location: ?tab=clients&id=' . $id); $_SESSION['flash'] = 'Карточка сохранена.'; exit;
+            case 'save_request':
+                $id = (int)$_POST['id'];
+                $data = array_intersect_key($_POST, REQUEST_FIELDS + ['status' => 1]);
+                $data['manager_note'] = str_replace("\r\n", "\n", (string)($_POST['manager_note'] ?? ''));
+                update_request($id, array_map(fn($v) => str_replace("\r\n", "\n", (string)$v), $data), true);
+                $_SESSION['flash'] = 'Запрос сохранён.';
+                header('Location: ?tab=requests&id=' . $id); exit;
             case 'delete_client':
                 delete_client((int)$_POST['id']);
                 back('clients', 'Клиент и все его диалоги удалены.');
@@ -112,7 +119,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 }
 
 $docs = db()->query('SELECT * FROM documents ORDER BY id DESC')->fetchAll();
-$tabs = ['clients' => 'Клиенты', 'prompt' => 'Промт', 'company' => 'Данные компании', 'docs' => 'Материалы', 'test' => 'Проверка'];
+$tabs = ['requests' => 'Запросы', 'clients' => 'Клиенты', 'prompt' => 'Промт', 'company' => 'Данные компании', 'docs' => 'Материалы', 'test' => 'Проверка'];
 $channelName = ['web' => 'сайт', 'telegram' => 'Telegram', 'admin' => 'проверка'];
 ?><!doctype html>
 <html lang="ru"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
@@ -201,6 +208,11 @@ $channelName = ['web' => 'сайт', 'telegram' => 'Telegram', 'admin' => 'пр�
     <?php if (isset($test['client'])): $tc = $test['client']; ?>
       <div class="card"><h2>Что бот узнал о тестовом клиенте</h2>
         <p class="hint">Имя: <?= h($tc['first_name'] ?: '—') ?> · Фамилия: <?= h($tc['last_name'] ?: '—') ?> · Телефон: <?= h($tc['phone'] ?: '—') ?> · Мессенджер: <?= h($tc['messenger'] ? (MESSENGERS[$tc['messenger']] ?? $tc['messenger']) . ' ' . $tc['messenger_contact'] : '—') ?></p>
+        <?php if ($tr = (client_requests((int)$tc['id'])[0] ?? null)): ?>
+          <p class="hint"><b>Запрос</b> (<?= h(REQUEST_STATUSES[$tr['status']]) ?><?= $tr['ready'] && $tr['status'] === 'draft' ? ', клиент готов — ждём контакт' : '' ?>):
+          <?php foreach (REQUEST_FIELDS as $f => $l): ?><?= $tr[$f] !== '' ? h($l) . ': ' . h($tr[$f]) . ' · ' : '' ?><?php endforeach; ?></p>
+          <p class="hint">В «Проверке» запрос менеджерам не отправляется.</p>
+        <?php endif; ?>
       </div>
     <?php endif; ?>
     <div class="card"><h2>Найденные фрагменты (<?= count($test['chunks'] ?? []) ?>)</h2>
@@ -209,6 +221,56 @@ $channelName = ['web' => 'сайт', 'telegram' => 'Telegram', 'admin' => 'пр�
       <?php endforeach; ?>
     </div>
   <?php endif; ?>
+
+<?php elseif ($tab === 'requests' && isset($_GET['id']) && ($r = get_request((int)$_GET['id']))): $c = get_client((int)$r['client_id']); ?>
+  <p><a href="?tab=requests">← Все запросы</a></p>
+  <form method="post" class="card">
+    <input type="hidden" name="csrf" value="<?= csrf() ?>"><input type="hidden" name="do" value="save_request"><input type="hidden" name="id" value="<?= $r['id'] ?>">
+    <h2>Запрос #<?= $r['id'] ?><?= $r['country'] ? ' — ' . h($r['country']) : '' ?></h2>
+    <p class="hint">Создан <?= h($r['created_at']) ?><?= $r['submitted_at'] ? ' · передан менеджеру ' . h($r['submitted_at']) : '' ?> · обновлён <?= h($r['updated_at']) ?> · канал: <?= h($channelName[$r['channel']] ?? $r['channel']) ?><?= $r['status'] === 'draft' && $r['ready'] ? ' · <b>клиент готов, но не оставил контакт</b>' : '' ?></p>
+    <div class="contact">
+      <b><a href="?tab=clients&id=<?= $c['id'] ?>"><?= h(client_display_name($c)) ?></a></b>
+      <?php if ($c['phone']): ?> · <a href="tel:<?= h($c['phone']) ?>"><?= h($c['phone']) ?></a><?php endif; ?>
+      <?php if ($c['messenger']): ?> · <?= h((MESSENGERS[$c['messenger']] ?? $c['messenger']) . ' ' . $c['messenger_contact']) ?><?php endif; ?>
+      <?php if ($c['tg_username']): ?> · <a href="https://t.me/<?= h($c['tg_username']) ?>" target="_blank">Telegram @<?= h($c['tg_username']) ?></a><?php endif; ?>
+      · <a href="?tab=clients&id=<?= $c['id'] ?>">переписка →</a>
+    </div>
+    <label>Статус<select name="status"><?php foreach (REQUEST_STATUSES as $k => $v): ?><option value="<?= $k ?>" <?= $r['status'] === $k ? 'selected' : '' ?>><?= h($v) ?></option><?php endforeach; ?></select></label>
+    <div class="grid">
+      <?php foreach (REQUEST_FIELDS as $f => $l): if ($f === 'circumstances') continue; ?>
+        <label><?= h($l) ?><input name="<?= $f ?>" value="<?= h($r[$f]) ?>"></label>
+      <?php endforeach; ?>
+    </div>
+    <label><?= h(REQUEST_FIELDS['circumstances']) ?><textarea name="circumstances" rows="3"><?= h($r['circumstances']) ?></textarea></label>
+    <label>Заметка менеджера<textarea name="manager_note" rows="3"><?= h($r['manager_note']) ?></textarea></label>
+    <button>Сохранить</button>
+  </form>
+
+<?php elseif ($tab === 'requests'): ?>
+  <?php
+    $filter = $_GET['status'] ?? 'open';
+    $filters = ['open' => 'Новые и в работе', 'draft' => 'Собираются', 'done' => 'Оформлены', 'cancelled' => 'Отменены', '' => 'Все'];
+    $reqs = list_requests($filter);
+  ?>
+  <nav class="chips"><?php foreach ($filters as $k => $v): ?><a href="?tab=requests&status=<?= $k ?>" class="<?= $filter === $k ? 'on' : '' ?>"><?= $v ?></a><?php endforeach; ?></nav>
+  <div class="card">
+    <h2>Запросы (<?= count($reqs) ?>)</h2>
+    <?php if (!cfg('manager_chat_ids')): ?><p class="hint">Уведомления менеджерам выключены: впишите id чатов в <code>manager_chat_ids</code> в config.php (id можно узнать командой /id у бота).</p><?php endif; ?>
+    <?php if (!$reqs): ?><p class="hint">Пока пусто. Запрос появляется, когда клиент в диалоге рассказывает о поездке; менеджеру он передаётся, когда клиент готов оформлять и оставил контакт.</p><?php else: ?>
+    <table class="clients">
+      <tr><th>#</th><th>Клиент</th><th>Направление</th><th>Даты</th><th>Заявит.</th><th>Город</th><th>Статус</th><th>Обновлён</th></tr>
+      <?php foreach ($reqs as $r): ?>
+        <tr onclick="location='?tab=requests&id=<?= $r['id'] ?>'">
+          <td><a href="?tab=requests&id=<?= $r['id'] ?>"><?= $r['id'] ?></a></td>
+          <td><?= h(client_display_name(array_merge($r, ['id' => $r['client_id']]))) ?><br><small><?= h($r['phone'] ?: ($r['messenger_contact'] ?: '')) ?></small></td>
+          <td><?= h(trim($r['country'] . ($r['purpose'] ? ', ' . $r['purpose'] : ''))) ?: '—' ?></td>
+          <td><?= h($r['dates'] ?: '—') ?></td><td><?= h($r['applicants'] ?: '—') ?></td><td><?= h($r['city'] ?: '—') ?></td>
+          <td><span class="st st-<?= $r['status'] ?>"><?= h(REQUEST_STATUSES[$r['status']]) ?></span></td>
+          <td class="nw"><?= h($r['updated_at']) ?></td>
+        </tr>
+      <?php endforeach; ?>
+    </table><?php endif; ?>
+  </div>
 
 <?php elseif ($tab === 'clients' && isset($_GET['id']) && ($c = get_client((int)$_GET['id']))): ?>
   <p><a href="?tab=clients">← Все клиенты</a></p>
@@ -229,6 +291,13 @@ $channelName = ['web' => 'сайт', 'telegram' => 'Telegram', 'admin' => 'пр�
   <form method="post" class="inline" onsubmit="return confirm('Удалить клиента и все его диалоги? Это нельзя отменить.')">
     <input type="hidden" name="csrf" value="<?= csrf() ?>"><input type="hidden" name="do" value="delete_client"><input type="hidden" name="id" value="<?= $c['id'] ?>"><button class="danger">Удалить клиента и переписку</button>
   </form>
+  <?php $creqs = client_requests((int)$c['id']); if ($creqs): ?>
+    <div class="card"><h2>Запросы клиента</h2><table>
+      <?php foreach ($creqs as $r): ?>
+        <tr><td><a href="?tab=requests&id=<?= $r['id'] ?>">#<?= $r['id'] ?> <?= h($r['country'] ?: 'без страны') ?></a></td><td><?= h($r['dates']) ?></td><td><span class="st st-<?= $r['status'] ?>"><?= h(REQUEST_STATUSES[$r['status']]) ?></span></td><td class="nw"><?= h($r['updated_at']) ?></td></tr>
+      <?php endforeach; ?>
+    </table></div>
+  <?php endif; ?>
   <?php $dialogs = client_dialogs((int)$c['id']); ?>
   <?php if (!$dialogs): ?><p class="hint">Диалогов нет.</p><?php endif; ?>
   <?php foreach ($dialogs as $i => $d): ?>

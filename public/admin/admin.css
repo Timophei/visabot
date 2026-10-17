@@ -52,3 +52,15 @@ details.dialog summary{font-weight:500}
 .msg.user{align-self:flex-end;background:#e8eef8}
 .msg.assistant{align-self:flex-start;background:#f4f6fa;border:1px solid var(--line)}
 .formats{margin:0 0 12px;padding-left:18px}.formats li{margin:2px 0}
+/* запросы */
+nav.chips{display:flex;gap:6px;flex-wrap:wrap;margin-bottom:12px}
+nav.chips a{padding:6px 12px;border-radius:16px;background:#fff;border:1px solid var(--line);color:#1d2330;text-decoration:none;font-size:14px}
+nav.chips a.on{background:var(--c);border-color:var(--c);color:#fff}
+.st{display:inline-block;padding:2px 8px;border-radius:10px;font-size:12px;white-space:nowrap;background:#eef1f6}
+.st-new{background:#fff1d6;color:#8a5a00;font-weight:600}
+.st-in_work{background:#e2edff;color:#1f4e8c}
+.st-done{background:#e6f4ea;color:#1e5e2f}
+.st-cancelled{color:#8a93a3}
+.contact{background:#f7f9fc;border-radius:8px;padding:10px 12px;margin:0 0 14px}
+.contact a{color:var(--c)}
+code{background:#f0f2f6;padding:1px 5px;border-radius:4px}
