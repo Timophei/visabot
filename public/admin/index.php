@@ -1,6 +1,7 @@
 <?php
 declare(strict_types=1);
 require __DIR__ . '/../../lib/core.php';
+require __DIR__ . '/../../lib/bitrix.php';
 
 session_name('visabot_admin');
 session_set_cookie_params(['httponly' => true, 'samesite' => 'Strict', 'secure' => !empty($_SERVER['HTTPS'])]);
@@ -106,7 +107,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 $data = array_intersect_key($_POST, REQUEST_FIELDS + ['status' => 1]);
                 $data['manager_note'] = str_replace("\r\n", "\n", (string)($_POST['manager_note'] ?? ''));
                 update_request($id, array_map(fn($v) => str_replace("\r\n", "\n", (string)$v), $data), true);
-                $_SESSION['flash'] = 'Запрос сохранён.';
+                $_SESSION['flash'] = 'Лид сохранён.';
                 header('Location: ?tab=requests&id=' . $id); exit;
             case 'delete_client':
                 delete_client((int)$_POST['id']);
@@ -119,7 +120,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 }
 
 $docs = db()->query('SELECT * FROM documents ORDER BY id DESC')->fetchAll();
-$tabs = ['requests' => 'Запросы', 'clients' => 'Клиенты', 'prompt' => 'Промт', 'company' => 'Данные компании', 'docs' => 'Материалы', 'test' => 'Проверка'];
+$tabs = ['requests' => 'Лиды', 'clients' => 'Клиенты', 'prompt' => 'Промт', 'company' => 'Данные компании', 'docs' => 'Материалы', 'test' => 'Проверка'];
 $channelName = CHANNEL_NAMES;
 ?><!doctype html>
 <html lang="ru"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
@@ -209,9 +210,9 @@ $channelName = CHANNEL_NAMES;
       <div class="card"><h2>Что бот узнал о тестовом клиенте</h2>
         <p class="hint">Имя: <?= h($tc['first_name'] ?: '—') ?> · Фамилия: <?= h($tc['last_name'] ?: '—') ?> · Телефон: <?= h($tc['phone'] ?: '—') ?> · Мессенджер: <?= h($tc['messenger'] ? (MESSENGERS[$tc['messenger']] ?? $tc['messenger']) . ' ' . $tc['messenger_contact'] : '—') ?></p>
         <?php if ($tr = (client_requests((int)$tc['id'])[0] ?? null)): ?>
-          <p class="hint"><b>Запрос</b> (<?= h(REQUEST_STATUSES[$tr['status']]) ?><?= $tr['ready'] && $tr['status'] === 'draft' ? ', клиент готов — ждём контакт' : '' ?>):
+          <p class="hint"><b>Лид</b> (<?= h(REQUEST_STATUSES[$tr['status']]) ?><?= $tr['ready'] && $tr['status'] === 'draft' ? ', клиент готов — ждём контакт' : '' ?>):
           <?php foreach (REQUEST_FIELDS as $f => $l): ?><?= $tr[$f] !== '' ? h($l) . ': ' . h($tr[$f]) . ' · ' : '' ?><?php endforeach; ?></p>
-          <p class="hint">В «Проверке» запрос менеджерам не отправляется.</p>
+          <p class="hint">В «Проверке» лид менеджерам и в CRM не отправляется.</p>
         <?php endif; ?>
       </div>
     <?php endif; ?>
@@ -223,10 +224,10 @@ $channelName = CHANNEL_NAMES;
   <?php endif; ?>
 
 <?php elseif ($tab === 'requests' && isset($_GET['id']) && ($r = get_request((int)$_GET['id']))): $c = get_client((int)$r['client_id']); ?>
-  <p><a href="?tab=requests">← Все запросы</a></p>
+  <p><a href="?tab=requests">← Все лиды</a></p>
   <form method="post" class="card">
     <input type="hidden" name="csrf" value="<?= csrf() ?>"><input type="hidden" name="do" value="save_request"><input type="hidden" name="id" value="<?= $r['id'] ?>">
-    <h2>Запрос #<?= $r['id'] ?><?= $r['country'] ? ' — ' . h($r['country']) : '' ?></h2>
+    <h2>Лид #<?= $r['id'] ?><?= $r['country'] ? ' — ' . h($r['country']) : '' ?></h2>
     <p class="hint">Создан <?= h($r['created_at']) ?><?= $r['submitted_at'] ? ' · передан менеджеру ' . h($r['submitted_at']) : '' ?> · обновлён <?= h($r['updated_at']) ?> · канал: <?= h($channelName[$r['channel']] ?? $r['channel']) ?><?= $r['status'] === 'draft' && $r['ready'] ? ' · <b>клиент готов, но не оставил контакт</b>' : '' ?></p>
     <div class="contact">
       <b><a href="?tab=clients&id=<?= $c['id'] ?>"><?= h(client_display_name($c)) ?></a></b>
@@ -234,6 +235,7 @@ $channelName = CHANNEL_NAMES;
       <?php if ($c['messenger']): ?> · <?= h((MESSENGERS[$c['messenger']] ?? $c['messenger']) . ' ' . $c['messenger_contact']) ?><?php endif; ?>
       <?php if ($c['tg_username']): ?> · <a href="https://t.me/<?= h($c['tg_username']) ?>" target="_blank">Telegram @<?= h($c['tg_username']) ?></a><?php endif; ?>
       · <a href="?tab=clients&id=<?= $c['id'] ?>">переписка →</a>
+      <?php if ($r['crm_id']): ?> · <a href="<?= h(b24_crm_url($r['crm_type'], (int)$r['crm_id'])) ?>" target="_blank"><?= $r['crm_type'] === 'DEAL' ? 'сделка' : 'лид' ?> в Битрикс24 #<?= (int)$r['crm_id'] ?></a><?php endif; ?>
     </div>
     <label>Статус<select name="status"><?php foreach (REQUEST_STATUSES as $k => $v): ?><option value="<?= $k ?>" <?= $r['status'] === $k ? 'selected' : '' ?>><?= h($v) ?></option><?php endforeach; ?></select></label>
     <div class="grid">
@@ -254,14 +256,14 @@ $channelName = CHANNEL_NAMES;
   ?>
   <nav class="chips"><?php foreach ($filters as $k => $v): ?><a href="?tab=requests&status=<?= $k ?>" class="<?= $filter === $k ? 'on' : '' ?>"><?= $v ?></a><?php endforeach; ?></nav>
   <div class="card">
-    <h2>Запросы (<?= count($reqs) ?>)</h2>
-    <?php if (!cfg('manager_chat_ids')): ?><p class="hint">Уведомления менеджерам выключены: впишите id чатов в <code>manager_chat_ids</code> в config.php (id можно узнать командой /id у бота).</p><?php endif; ?>
-    <?php if (!$reqs): ?><p class="hint">Пока пусто. Запрос появляется, когда клиент в диалоге рассказывает о поездке; менеджеру он передаётся, когда клиент готов оформлять и оставил контакт.</p><?php else: ?>
+    <h2>Лиды (<?= count($reqs) ?>)</h2>
+    <?php if (!cfg('manager_chat_ids')): ?><p class="hint">Telegram-уведомления менеджерам выключены: впишите id чатов в <code>manager_chat_ids</code> в config.php (id можно узнать командой /id у бота).</p><?php endif; ?>
+    <?php if (!$reqs): ?><p class="hint">Пока пусто. Лид появляется, когда клиент в диалоге рассказывает о поездке; менеджеру он передаётся, когда клиент готов оформлять и оставил контакт.</p><?php else: ?>
     <table class="clients">
       <tr><th>#</th><th>Клиент</th><th>Направление</th><th>Даты</th><th>Заявит.</th><th>Город</th><th>Статус</th><th>Обновлён</th></tr>
       <?php foreach ($reqs as $r): ?>
         <tr onclick="location='?tab=requests&id=<?= $r['id'] ?>'">
-          <td><a href="?tab=requests&id=<?= $r['id'] ?>"><?= $r['id'] ?></a></td>
+          <td><a href="?tab=requests&id=<?= $r['id'] ?>"><?= $r['id'] ?></a><?php if ($r['crm_id']): ?><br><small>B24 #<?= (int)$r['crm_id'] ?></small><?php endif; ?></td>
           <td><?= h(client_display_name(array_merge($r, ['id' => $r['client_id']]))) ?><br><small><?= h($r['phone'] ?: ($r['messenger_contact'] ?: '')) ?></small></td>
           <td><?= h(trim($r['country'] . ($r['purpose'] ? ', ' . $r['purpose'] : ''))) ?: '—' ?></td>
           <td><?= h($r['dates'] ?: '—') ?></td><td><?= h($r['applicants'] ?: '—') ?></td><td><?= h($r['city'] ?: '—') ?></td>
@@ -292,7 +294,7 @@ $channelName = CHANNEL_NAMES;
     <input type="hidden" name="csrf" value="<?= csrf() ?>"><input type="hidden" name="do" value="delete_client"><input type="hidden" name="id" value="<?= $c['id'] ?>"><button class="danger">Удалить клиента и переписку</button>
   </form>
   <?php $creqs = client_requests((int)$c['id']); if ($creqs): ?>
-    <div class="card"><h2>Запросы клиента</h2><table>
+    <div class="card"><h2>Лиды клиента</h2><table>
       <?php foreach ($creqs as $r): ?>
         <tr><td><a href="?tab=requests&id=<?= $r['id'] ?>">#<?= $r['id'] ?> <?= h($r['country'] ?: 'без страны') ?></a></td><td><?= h($r['dates']) ?></td><td><span class="st st-<?= $r['status'] ?>"><?= h(REQUEST_STATUSES[$r['status']]) ?></span></td><td class="nw"><?= h($r['updated_at']) ?></td></tr>
       <?php endforeach; ?>
@@ -304,7 +306,7 @@ $channelName = CHANNEL_NAMES;
     <details class="card dialog" <?= $i === 0 ? 'open' : '' ?>>
       <summary>Диалог #<?= $d['id'] ?> · <?= h($channelName[$d['channel']] ?? $d['channel']) ?> · <?= h($d['started_at']) ?> — <?= h($d['last_at']) ?> · <?= (int)$d['messages'] ?> сообщ.</summary>
       <div class="chatlog"><?php foreach (dialog_messages((int)$d['id']) as $m): ?>
-        <div class="msg <?= $m['role'] ?>"><small><?= $m['role'] === 'user' ? 'Клиент' : 'Бот' ?> · <?= h($m['created_at']) ?></small><?= nl2br(h($m['content'])) ?></div>
+        <div class="msg <?= $m['role'] ?>"><small><?= ['user' => 'Клиент', 'operator' => 'Менеджер', 'assistant' => 'Бот'][$m['role']] ?? $m['role'] ?> · <?= h($m['created_at']) ?></small><?= nl2br(h($m['content'])) ?></div>
       <?php endforeach; ?></div>
     </details>
   <?php endforeach; ?>

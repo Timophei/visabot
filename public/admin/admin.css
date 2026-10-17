@@ -64,3 +64,4 @@ nav.chips a.on{background:var(--c);border-color:var(--c);color:#fff}
 .contact{background:#f7f9fc;border-radius:8px;padding:10px 12px;margin:0 0 14px}
 .contact a{color:var(--c)}
 code{background:#f0f2f6;padding:1px 5px;border-radius:4px}
+.msg.operator{align-self:flex-start;background:#fff5e0;border:1px solid #f0dcb0}

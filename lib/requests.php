@@ -2,7 +2,7 @@
 declare(strict_types=1);
 
 /**
- * Запросы (лиды) — то, что передаётся менеджеру.
+ * Лиды (в коде — requests) — то, что передаётся менеджеру. В Битрикс24 связываются с лидом/сделкой линии.
  *
  * Бот собирает поля запроса по ходу диалога (модель возвращает их вместе с ответом).
  * Пока клиент не готов — запрос в статусе «собирается» (draft).
@@ -55,6 +55,11 @@ function migrate_requests(PDO $pdo): void
     CREATE INDEX IF NOT EXISTS requests_client ON requests(client_id, id);
     CREATE INDEX IF NOT EXISTS requests_status ON requests(status, id);
     SQL);
+    // связь с лидом/сделкой Битрикс24
+    $cols = array_column($pdo->query('PRAGMA table_info(requests)')->fetchAll(), 'name');
+    foreach (['crm_type' => "TEXT NOT NULL DEFAULT ''", 'crm_id' => 'INTEGER NOT NULL DEFAULT 0', 'crm_hash' => "TEXT NOT NULL DEFAULT ''", 'b24_chat_id' => 'INTEGER NOT NULL DEFAULT 0'] as $c => $def) {
+        if (!in_array($c, $cols, true)) $pdo->exec("ALTER TABLE requests ADD COLUMN $c $def");
+    }
 }
 
 function get_request(int $id): ?array
@@ -150,7 +155,7 @@ function last_submitted_request(?int $set = null): ?int
 /** Блок для промта: что уже собрано по запросу и чего не хватает. */
 function request_block(?array $r): string
 {
-    $s = "## Запрос клиента (это передаётся менеджеру)\n";
+    $s = "## Лид: сведения о поездке (передаются менеджеру и в CRM)\n";
     $known = []; $missing = [];
     foreach (REQUEST_FIELDS as $f => $label) {
         $v = $r[$f] ?? '';
@@ -158,7 +163,7 @@ function request_block(?array $r): string
     }
     $s .= $known ? implode("\n", $known) . "\n" : "- пока ничего не собрано\n";
     if ($missing) $s .= 'Ещё не известно: ' . implode(', ', $missing) . ".\n";
-    if ($r && $r['status'] !== 'draft') $s .= "- Запрос уже передан менеджеру (статус: " . REQUEST_STATUSES[$r['status']] . "). Новые подробности тоже дойдут до него.\n";
+    if ($r && $r['status'] !== 'draft') $s .= "- Лид уже передан менеджеру (статус: " . REQUEST_STATUSES[$r['status']] . "). Новые подробности тоже дойдут до него.\n";
     $s .= "- Собирай эти сведения естественно, по ходу консультации: по 1–2 вопроса за раз, только когда это к месту, не устраивай анкету. Известное не переспрашивай.\n"
         . "- «Предыдущие визы» и «обстоятельства» (отказы, дети, работа без официального трудоустройства, пенсионеры, сроки на исходе и т. п.) важны для оформления — уточняй их, когда клиент близок к записи.\n";
     return $s;
@@ -169,6 +174,7 @@ function request_message(array $r, array $c, string $title, array $changed = [])
 {
     $h = fn($s) => htmlspecialchars((string)$s, ENT_NOQUOTES, 'UTF-8');
     $lines = ["<b>$title #{$r['id']}</b>", ''];
+    if ($r['crm_id'] && function_exists('b24_crm_url')) $lines[] = 'CRM: ' . b24_crm_url($r['crm_type'], (int)$r['crm_id']);
     $lines[] = '👤 ' . $h(client_display_name($c));
     if ($c['phone']) $lines[] = '📞 ' . $h($c['phone']);
     if ($c['messenger']) $lines[] = '💬 ' . $h((MESSENGERS[$c['messenger']] ?? $c['messenger']) . ' ' . $c['messenger_contact']);
@@ -226,8 +232,8 @@ function process_request(int $clientId, int $dialogId, string $channel, array $d
         update_request((int)$r['id'], ['status' => 'new']);
         $r = get_request((int)$r['id']);
         last_submitted_request((int)$r['id']);
-        if ($channel !== 'admin') notify_managers(request_message($r, $client, '🆕 Новый запрос'));
+        if ($channel !== 'admin') notify_managers(request_message($r, $client, '🆕 Новый лид'));
     } elseif (in_array($r['status'], ['new', 'in_work'], true) && $changed && $channel !== 'admin') {
-        notify_managers(request_message($r, $client, '✏️ Дополнение к запросу', $changed));
+        notify_managers(request_message($r, $client, '✏️ Дополнение к лиду', $changed));
     }
 }
