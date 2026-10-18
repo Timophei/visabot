@@ -126,7 +126,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 }
 
 $docs = db()->query('SELECT * FROM documents ORDER BY id DESC')->fetchAll();
-$tabs = ['requests' => 'Лиды', 'clients' => 'Клиенты', 'prompt' => 'Промт', 'company' => 'Данные компании', 'docs' => 'Материалы', 'test' => 'Проверка'];
+$tabs = ['requests' => 'Лиды', 'dialogs' => 'Диалоги', 'clients' => 'Клиенты', 'prompt' => 'Промт', 'company' => 'Данные компании', 'docs' => 'Материалы', 'test' => 'Проверка'];
 $channelName = CHANNEL_NAMES;
 if (cfg('bitrix_webhook')) $tabs['bitrix'] = 'Битрикс24';
 ?><!doctype html>
@@ -230,6 +230,30 @@ if (cfg('bitrix_webhook')) $tabs['bitrix'] = 'Битрикс24';
     </div>
   <?php endif; ?>
 
+<?php elseif ($tab === 'dialogs'): ?>
+  <?php
+    $ch = $_GET['channel'] ?? '';
+    $chans = ['' => 'Все каналы', 'bitrix' => 'Битрикс24', 'telegram' => 'Telegram', 'web' => 'Сайт'];
+    $dl = recent_dialogs(isset($chans[$ch]) ? $ch : '');
+  ?>
+  <nav class="chips"><?php foreach ($chans as $k => $v): ?><a href="?tab=dialogs&channel=<?= $k ?>" class="<?= $ch === $k ? 'on' : '' ?>"><?= $v ?></a><?php endforeach; ?></nav>
+  <div class="card">
+    <h2>Диалоги (<?= count($dl) ?>)</h2>
+    <?php if (!$dl): ?><p class="hint">Пока нет диалогов.</p><?php else: ?>
+    <table class="clients">
+      <tr><th>Клиент</th><th>Канал</th><th>Последнее сообщение</th><th>Сообщ.</th><th>Обновлён</th></tr>
+      <?php foreach ($dl as $d): $cl = array_merge($d, ['id' => $d['client_id']]); ?>
+        <tr onclick="location='?tab=clients&id=<?= $d['client_id'] ?>#d<?= $d['id'] ?>'">
+          <td><a href="?tab=clients&id=<?= $d['client_id'] ?>#d<?= $d['id'] ?>"><?= h(client_display_name($cl)) ?></a></td>
+          <td class="nw"><?= h($channelName[$d['channel']] ?? $d['channel']) ?><?php if ($d['channel'] === 'bitrix' && $d['ext_id']): ?><br><small><a href="<?= h(b24_chat_url($d['ext_id'])) ?>" target="_blank" onclick="event.stopPropagation()">чат в Б24</a></small><?php endif; ?></td>
+          <td><small><?= ['user' => 'Клиент', 'assistant' => 'Бот', 'operator' => 'Менеджер'][$d['last_role']] ?? '' ?>:</small> <?= h(mb_strimwidth((string)$d['last_text'], 0, 140, '…')) ?></td>
+          <td><?= (int)$d['messages'] ?></td>
+          <td class="nw"><?= h($d['last_at']) ?></td>
+        </tr>
+      <?php endforeach; ?>
+    </table><?php endif; ?>
+  </div>
+
 <?php elseif ($tab === 'bitrix'): ?>
   <?php
     $b24err = '';
@@ -309,8 +333,8 @@ if (cfg('bitrix_webhook')) $tabs['bitrix'] = 'Битрикс24';
 
 <?php elseif ($tab === 'requests'): ?>
   <?php
-    $filter = $_GET['status'] ?? 'open';
-    $filters = ['open' => 'Новые и в работе', 'draft' => 'Собираются', 'done' => 'Оформлены', 'cancelled' => 'Отменены', '' => 'Все'];
+    $filter = $_GET['status'] ?? 'active';
+    $filters = ['active' => 'Активные', 'open' => 'Переданы менеджеру', 'draft' => 'Собираются', 'done' => 'Оформлены', 'cancelled' => 'Отменены', '' => 'Все'];
     $reqs = list_requests($filter);
   ?>
   <nav class="chips"><?php foreach ($filters as $k => $v): ?><a href="?tab=requests&status=<?= $k ?>" class="<?= $filter === $k ? 'on' : '' ?>"><?= $v ?></a><?php endforeach; ?></nav>
@@ -362,8 +386,8 @@ if (cfg('bitrix_webhook')) $tabs['bitrix'] = 'Битрикс24';
   <?php $dialogs = client_dialogs((int)$c['id']); ?>
   <?php if (!$dialogs): ?><p class="hint">Диалогов нет.</p><?php endif; ?>
   <?php foreach ($dialogs as $i => $d): ?>
-    <details class="card dialog" <?= $i === 0 ? 'open' : '' ?>>
-      <summary>Диалог #<?= $d['id'] ?> · <?= h($channelName[$d['channel']] ?? $d['channel']) ?> · <?= h($d['started_at']) ?> — <?= h($d['last_at']) ?> · <?= (int)$d['messages'] ?> сообщ.</summary>
+    <details class="card dialog" id="d<?= $d['id'] ?>" <?= $i === 0 || (int)($_GET['d'] ?? 0) === (int)$d['id'] ? 'open' : '' ?>>
+      <summary>Диалог #<?= $d['id'] ?> · <?= h($channelName[$d['channel']] ?? $d['channel']) ?> · <?= h($d['started_at']) ?> — <?= h($d['last_at']) ?> · <?= (int)$d['messages'] ?> сообщ.<?php if ($d['channel'] === 'bitrix' && $d['ext_id']): ?> · <a href="<?= h(b24_chat_url($d['ext_id'])) ?>" target="_blank" onclick="event.stopPropagation()">открыть чат в Битрикс24</a><?php endif; ?></summary>
       <div class="chatlog"><?php foreach (dialog_messages((int)$d['id']) as $m): ?>
         <div class="msg <?= $m['role'] ?>"><small><?= ['user' => 'Клиент', 'operator' => 'Менеджер', 'assistant' => 'Бот'][$m['role']] ?? $m['role'] ?> · <?= h($m['created_at']) ?></small><?= nl2br(h($m['content'])) ?></div>
       <?php endforeach; ?></div>

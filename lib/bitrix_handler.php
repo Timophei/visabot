@@ -128,6 +128,7 @@ function b24_handle(array $payload): void
         update_client($cid, $prefill, true);
 
         $dialog = current_dialog($cid, 'bitrix', !empty($st['new']));
+        db()->prepare("UPDATE dialogs SET ext_id = ? WHERE id = ? AND ext_id = ''")->execute([$e['dialog_id'], $dialog]);
         $st['new'] = false;
         $st['client_id'] = $cid;
         st_set($chatKey, $st);

@@ -66,6 +66,12 @@ function b24_portal(): string
     return isset($u['host']) ? ($u['scheme'] ?? 'https') . '://' . $u['host'] . (isset($u['port']) ? ':' . $u['port'] : '') : '';
 }
 
+/** Ссылка на чат открытой линии в Битрикс24. */
+function b24_chat_url(string $dialogId): string
+{
+    return b24_portal() . '/online/?IM_DIALOG=' . rawurlencode($dialogId);
+}
+
 function b24_crm_url(string $type, int $id): string
 {
     return b24_portal() . '/crm/' . strtolower($type) . '/details/' . $id . '/';

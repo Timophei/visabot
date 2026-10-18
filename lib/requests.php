@@ -91,6 +91,7 @@ function list_requests(string $status = '', int $limit = 300): array
     $args = [];
     $sql .= " WHERE r.channel != 'admin'"; // тестовые запросы из «Проверки» не показываем
     if ($status === 'open') $sql .= " AND r.status IN ('new','in_work')";
+    elseif ($status === 'active') $sql .= " AND r.status IN ('draft','new','in_work')";
     elseif ($status !== '') { $sql .= ' AND r.status = ?'; $args[] = $status; }
     $sql .= " ORDER BY CASE r.status WHEN 'new' THEN 0 WHEN 'in_work' THEN 1 WHEN 'draft' THEN 2 ELSE 3 END, r.updated_at DESC LIMIT " . (int)$limit;
     $st = db()->prepare($sql);

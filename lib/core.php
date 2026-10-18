@@ -122,6 +122,9 @@ function migrate(PDO $pdo): void
     if (!in_array('dialog_id', $cols, true)) $pdo->exec('ALTER TABLE messages ADD COLUMN dialog_id INTEGER');
     if (!in_array('client_id', $cols, true)) $pdo->exec('ALTER TABLE messages ADD COLUMN client_id INTEGER');
     $pdo->exec('CREATE INDEX IF NOT EXISTS messages_dialog ON messages(dialog_id, id)');
+    // внешний id диалога (например, чат открытой линии Битрикс24 «chat930»)
+    $cols = array_column($pdo->query('PRAGMA table_info(dialogs)')->fetchAll(), 'name');
+    if (!in_array('ext_id', $cols, true)) $pdo->exec("ALTER TABLE dialogs ADD COLUMN ext_id TEXT NOT NULL DEFAULT ''");
 
     // Материалы любых форматов: метка места в источнике и уровень доверия
     $cols = array_column($pdo->query('PRAGMA table_info(chunks)')->fetchAll(), 'name');
@@ -589,6 +592,22 @@ function dialog_messages(int $dialogId, ?int $limit = null): array
     $st = db()->prepare($sql);
     $st->execute([$dialogId]);
     return array_reverse($st->fetchAll());
+}
+
+/** Последние диалоги всех клиентов (для вкладки «Диалоги»). */
+function recent_dialogs(string $channel = '', int $limit = 150): array
+{
+    $sql = "SELECT d.*, c.first_name, c.last_name, c.phone, c.tg_username, c.messenger_contact,
+                   (SELECT content FROM messages m WHERE m.dialog_id = d.id ORDER BY m.id DESC LIMIT 1) AS last_text,
+                   (SELECT role FROM messages m WHERE m.dialog_id = d.id ORDER BY m.id DESC LIMIT 1) AS last_role
+            FROM dialogs d JOIN clients c ON c.id = d.client_id
+            WHERE d.messages > 0 AND d.channel != 'admin'";
+    $args = [];
+    if ($channel !== '') { $sql .= ' AND d.channel = ?'; $args[] = $channel; }
+    $sql .= ' ORDER BY d.last_at DESC LIMIT ' . (int)$limit;
+    $st = db()->prepare($sql);
+    $st->execute($args);
+    return $st->fetchAll();
 }
 
 function client_dialogs(int $clientId): array
