@@ -18,6 +18,10 @@ if (!flock($lock, LOCK_EX | LOCK_NB)) { fwrite(STDERR, "Сборщик уже з
 
 if (!cfg('bitrix_bot_id')) { fwrite(STDERR, "Боты не зарегистрированы (bitrix_bot_id пусто)\n"); exit(1); }
 b24_log('сборщик событий запущен');
+// сообщения, которые обрабатывались в момент прошлой остановки, — обработать заново
+b24_state_init();
+$n = db()->exec("DELETE FROM b24_state WHERE k LIKE 'msg:%' AND v = 'processing'");
+if ($n) b24_log("незавершённых сообщений с прошлого запуска: $n — обработаю заново");
 
 $idle = 0;
 do {
@@ -36,7 +40,11 @@ do {
                 foreach ($events as $ev) {
                     $payload = ['event' => (string)($ev['type'] ?? $ev['event'] ?? ''), 'data' => $ev['data'] ?? []];
                     if (empty($payload['data']['bot']['id'])) $payload['data']['bot']['id'] = $botId;
-                    b24_handle($payload);
+                    try {
+                        b24_handle($payload);
+                    } catch (Throwable $t) {
+                        b24_log('сборщик: ошибка обработки события: ' . $t->getMessage());
+                    }
                     $got++;
                 }
                 if ($events && isset($res['nextOffset'])) set_setting($offKey, (string)$res['nextOffset']);

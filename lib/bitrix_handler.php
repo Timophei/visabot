@@ -28,13 +28,26 @@ function st_set(string $k, array $v): void
     db()->prepare('INSERT INTO b24_state(k, v, ts) VALUES(?,?,?) ON CONFLICT(k) DO UPDATE SET v = excluded.v, ts = excluded.ts')
         ->execute([$k, json_encode($v, JSON_UNESCAPED_UNICODE), time()]);
 }
-// защита от повторной обработки одного сообщения (его могут прислать оба бота)
-function seen(string $msgId): bool
+/**
+ * Защита от повторной обработки одного сообщения (его могут прислать оба бота).
+ * Сообщение «занимается» на время обработки и помечается готовым только в конце.
+ * Если обработка оборвалась (перезапуск службы, сбой) — через 2 минуты сообщение можно взять снова.
+ */
+function msg_claim(string $msgId): bool
 {
-    if ($msgId === '') return false;
+    if ($msgId === '') return true;
+    $k = 'msg:' . $msgId;
     $s = db()->prepare('INSERT OR IGNORE INTO b24_state(k, v, ts) VALUES(?, ?, ?)');
-    $s->execute(['msg:' . $msgId, '1', time()]);
-    return $s->rowCount() === 0;
+    $s->execute([$k, 'processing', time()]);
+    if ($s->rowCount() === 1) return true;
+    // уже есть: готово или ещё обрабатывается — пропускаем; зависло больше 2 минут — забираем
+    $u = db()->prepare("UPDATE b24_state SET ts = ? WHERE k = ? AND v = 'processing' AND ts < ?");
+    $u->execute([time(), $k, time() - 120]);
+    return $u->rowCount() === 1;
+}
+function msg_done(string $msgId): void
+{
+    if ($msgId !== '') db()->prepare("UPDATE b24_state SET v = 'done', ts = ? WHERE k = ?")->execute([time(), 'msg:' . $msgId]);
 }
 
 
@@ -69,7 +82,9 @@ function b24_handle(array $payload): void
             st_set($chatKey, $st);
             return;
         }
-        if ($e['event'] !== 'ONIMBOTMESSAGEADD' || seen($msgId)) return;
+        if ($e['event'] !== 'ONIMBOTMESSAGEADD') return;
+        if (!msg_claim($msgId)) { b24_log("сообщение $msgId уже обработано — пропускаю"); return; }
+        $claimed = true;
 
         $role = b24_author_role($e);
         if ($role === 'bot') return;
@@ -148,7 +163,9 @@ function b24_handle(array $payload): void
 
         if ($r = open_request($cid)) b24_sync_crm($r, get_client($cid), $e['chat_id'], $e['entity_data']);
     } catch (Throwable $t) {
-        b24_log('ОШИБКА: ' . $t->getMessage());
+        b24_log('ОШИБКА: ' . $t->getMessage() . ' (' . basename($t->getFile()) . ':' . $t->getLine() . ')');
         error_log('[visa-bot] b24: ' . $t->getMessage());
+    } finally {
+        if (!empty($claimed)) msg_done($msgId);
     }
 }
