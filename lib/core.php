@@ -777,7 +777,9 @@ function answer(int $clientId, int $dialogId, string $channel, string $question,
     if (preg_match('/^(gpt-5|o\d)/', (string)$payload['model'])) {
         // у «думающих» моделей лимит включает размышления — при малом лимите ответ бывает пустым
         $payload['max_completion_tokens'] = max($payload['max_completion_tokens'], 3000);
-        if (cfg('reasoning_effort', 'low') !== null) $payload['reasoning_effort'] = cfg('reasoning_effort', 'low');
+        $effort = cfg('reasoning_effort', 'minimal');
+        if ($effort === 'minimal' && !str_starts_with((string)$payload['model'], 'gpt-5')) $effort = 'low'; // minimal есть только у gpt-5
+        if ($effort !== null) $payload['reasoning_effort'] = $effort;
     }
 
     $t1 = microtime(true);

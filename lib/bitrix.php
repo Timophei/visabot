@@ -35,6 +35,24 @@ function b24_log(string $msg): void
     @file_put_contents($file, date('Y-m-d H:i:s') . ' ' . $msg . "\n", FILE_APPEND);
 }
 
+/** Сырой журнал всех событий от Битрикса (data/b24-events.log) — для разбора, что именно пришло. */
+function b24_raw_log(array $payload): void
+{
+    $file = cfg('data_dir', BOT_ROOT . '/data') . '/b24-events.log';
+    if (is_file($file) && filesize($file) > 3_000_000) @rename($file, $file . '.1');
+    $d = $payload['data'] ?? [];
+    $short = [
+        'event' => $payload['event'] ?? '',
+        'bot'   => $d['bot']['id'] ?? null,
+        'msg'   => $d['message']['id'] ?? ($d['PARAMS']['MESSAGE_ID'] ?? null),
+        'chat'  => $d['chat'] ?? ($d['PARAMS']['DIALOG_ID'] ?? null),
+        'user'  => $d['user'] ?? ($d['USER'] ?? null),
+        'text'  => mb_substr((string)($d['message']['text'] ?? ($d['PARAMS']['MESSAGE'] ?? '')), 0, 100),
+        'keys'  => array_keys($d),
+    ];
+    @file_put_contents($file, date('Y-m-d H:i:s') . ' ' . json_encode($short, JSON_UNESCAPED_UNICODE) . "\n", FILE_APPEND);
+}
+
 /** Вызов REST-метода через входящий вебхук. */
 function b24(string $method, array $params): array
 {

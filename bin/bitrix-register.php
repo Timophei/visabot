@@ -8,6 +8,7 @@
 //   php bin/bitrix-register.php --chat 123       — проверить конкретный чат линии: привязку к CRM и добавление консультанта
 //   php bin/bitrix-register.php --lines          — список открытых линий (id для bitrix_transfer_queue_id)
 //   php bin/bitrix-register.php --log            — последние строки журнала интеграции
+//   php bin/bitrix-register.php --events         — очередь событий ботов в Битриксе и сырой журнал полученных событий
 //   php bin/bitrix-register.php --mode fetch     — переключить ботов: наш сервер сам забирает события (для коробок за фаерволом)
 //   php bin/bitrix-register.php --mode webhook   — переключить ботов: Битрикс шлёт события на наш адрес
 //
@@ -30,7 +31,7 @@ if ($has('--log')) {
     exit;
 }
 
-foreach (['bitrix_webhook', 'bitrix_bot_token', 'bitrix_secret', 'public_url'] as $k) {
+foreach ($has('--events') ? ['bitrix_webhook', 'bitrix_bot_token'] : ['bitrix_webhook', 'bitrix_bot_token', 'bitrix_secret', 'public_url'] as $k) {
     if (!cfg($k)) { fwrite(STDERR, "Заполните '$k' в config.php\n"); exit(1); }
 }
 $url = rtrim((string)cfg('public_url'), '/') . '/bitrix.php?s=' . urlencode((string)cfg('bitrix_secret'));
@@ -49,6 +50,27 @@ if ($has('--mode')) {
     }
     $say("\nВпишите в config.php: 'bitrix_event_mode' => '$mode',");
     if ($mode === 'fetch') $say("и запустите сборщик событий (см. deploy/visabot-b24.service).");
+    exit;
+}
+
+// Заглянуть в очередь событий ботов в Битриксе (не забирая их) и в сырой журнал полученных событий
+if ($has('--events')) {
+    foreach (['router', 'consultant'] as $b) {
+        [$id, $t] = b24_bot($b);
+        $off = setting('b24_offset_' . $b);
+        $p = ['botId' => $id, 'botToken' => $t, 'limit' => 20];
+        if ($off !== '') $p['offset'] = (int)$off;
+        try {
+            $r = b24('imbot.v2.Event.get', $p)['result'] ?? [];
+            $say("$b #$id (offset " . ($off !== '' ? $off : '—') . '): в очереди ' . count($r['events'] ?? []) . ', nextOffset ' . ($r['nextOffset'] ?? '?') . ', hasMore ' . (!empty($r['hasMore']) ? 'да' : 'нет'));
+            foreach ($r['events'] ?? [] as $ev) {
+                $say('   ' . ($ev['eventId'] ?? '?') . ' ' . ($ev['type'] ?? '?') . ' chat=' . ($ev['data']['chat']['id'] ?? '?') . ' user=' . ($ev['data']['user']['id'] ?? '?') . ' «' . mb_substr((string)($ev['data']['message']['text'] ?? ''), 0, 60) . '»');
+            }
+        } catch (Throwable $e) { $bad("$b: " . $e->getMessage()); }
+    }
+    $f = cfg('data_dir', BOT_ROOT . '/data') . '/b24-events.log';
+    $say("\nПоследние полученные события (data/b24-events.log):");
+    if (is_file($f)) foreach (array_slice(file($f), -15) as $l) echo '   ', mb_substr($l, 0, 400);
     exit;
 }
 

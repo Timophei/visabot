@@ -8,7 +8,7 @@ return [
     'openai_api_key'   => 'sk-...',
     'openai_base_url'  => 'https://api.openai.com/v1', // если сервер в РФ и OpenAI блокирует — адрес вашего прокси/шлюза
     'chat_model'       => 'gpt-5-mini',            // модель для ответов
-    'reasoning_effort' => 'low',   // для моделей gpt-5*/o*: low = быстрее и дешевле; null — не передавать (для gpt-4o и т.п.)
+    'reasoning_effort' => 'minimal', // gpt-5*: minimal — быстрее всего (рекомендуется для чата), low/medium — дольше «думает»; null — не передавать
     'embedding_model'  => 'text-embedding-3-small', // модель для смыслового поиска по учебникам
     'use_embeddings'   => true,   // false = только полнотекстовый поиск
     'temperature'      => null,   // null = по умолчанию модели

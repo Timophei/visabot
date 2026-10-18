@@ -57,7 +57,11 @@ function b24_handle(array $payload): void
     b24_state_init();
     $e = b24_parse_event($payload);
     $msgId = (string)($payload['data']['message']['id'] ?? $payload['data']['PARAMS']['MESSAGE_ID'] ?? '');
-    if ($e['event'] === '' || $e['dialog_id'] === '') return;
+    b24_raw_log($payload);
+    if ($e['event'] === '' || $e['dialog_id'] === '') {
+        b24_log('событие без чата/типа — пропущено: ' . mb_substr(json_encode($payload, JSON_UNESCAPED_UNICODE), 0, 300));
+        return;
+    }
 
     $chatKey = 'chat:' . ($e['chat_id'] ?: $e['dialog_id']);
     $isRouter = $e['bot_id'] && $e['bot_id'] === (int)cfg('bitrix_router_bot_id');
@@ -76,10 +80,14 @@ function b24_handle(array $payload): void
 
         /* ---------- новое обращение ---------- */
         if ($e['event'] === 'ONIMBOTJOINCHAT') {
-            if ($isRouter && $e['chat_id']) b24_add_consultant($e['chat_id']);
-            $st = st_get($chatKey);
-            $st['new'] = true;
-            st_set($chatKey, $st);
+            // новое обращение начинается, только когда в чат входит Приёмщик (штатный бот линии);
+            // вход Консультанта — следствие этого же обращения, новый диалог не начинаем
+            if ($isRouter) {
+                if ($e['chat_id']) b24_add_consultant($e['chat_id']);
+                $st = st_get($chatKey);
+                $st['new'] = true;
+                st_set($chatKey, $st);
+            }
             return;
         }
         if ($e['event'] !== 'ONIMBOTMESSAGEADD') return;
