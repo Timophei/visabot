@@ -737,6 +737,14 @@ function response_schema(): array
  * Главная функция: вопрос клиента → ответ. Попутно сохраняет контакты клиента и поля запроса.
  * Используется и сайтом, и Telegram, и проверкой в админке.
  */
+/** Замеры последнего ответа: сколько секунд ушло на поиск и на нейросеть. */
+function answer_timing(?array $set = null): array
+{
+    static $t = [];
+    if ($set !== null) $t = $set;
+    return $t;
+}
+
 /**
  * $task   — поручение менеджера (/бот …): бот пишет клиенту по поручению.
  * $silent — бот молчит (рядом активен менеджер): только запоминает сообщение и собирает сведения.
@@ -755,7 +763,9 @@ function answer(int $clientId, int $dialogId, string $channel, string $question,
     for ($i = count($history) - 1; $i >= 0; $i--) {
         if ($history[$i]['role'] === 'user') { $searchText = $history[$i]['content'] . "\n" . $question; break; }
     }
+    $t0 = microtime(true);
     $chunks = retrieve($searchText);
+    $tSearch = microtime(true) - $t0;
 
     $payload = [
         'model'                 => cfg('chat_model', 'gpt-5-mini'),
@@ -770,6 +780,7 @@ function answer(int $clientId, int $dialogId, string $channel, string $question,
         if (cfg('reasoning_effort', 'low') !== null) $payload['reasoning_effort'] = cfg('reasoning_effort', 'low');
     }
 
+    $t1 = microtime(true);
     try {
         $res = openai('chat/completions', $payload);
     } catch (RuntimeException $e) {
@@ -807,6 +818,13 @@ function answer(int $clientId, int $dialogId, string $channel, string $question,
     }
 
     if ($task === null) save_message($clientId, $dialogId, $channel, 'user', $question);
+    answer_timing([
+        'search' => round($tSearch, 1),
+        'llm'    => round(microtime(true) - $t1, 1),
+        'model'  => (string)($res['model'] ?? $payload['model']),
+        'tokens' => (int)($res['usage']['total_tokens'] ?? 0),
+        'chunks' => count($chunks),
+    ]);
     if (!$silent) save_message($clientId, $dialogId, $channel, 'assistant', $reply);
     return $reply;
 }

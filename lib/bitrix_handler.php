@@ -138,7 +138,11 @@ function b24_handle(array $payload): void
         if (!$silent && rate_limited('b24:' . $e['user_id'])) $silent = true;
 
         if (!$silent) b24_typing($e['dialog_id']);
+        $tStart = microtime(true);
         $reply = answer($cid, $dialog, 'bitrix', $text, null, $silent);
+        $tm = answer_timing();
+        b24_log(sprintf('chat %d: ответ за %.1f с (поиск %.1f с, нейросеть %.1f с, %s, %d токенов, фрагментов %d)',
+            $e['chat_id'], microtime(true) - $tStart, $tm['search'] ?? 0, $tm['llm'] ?? 0, $tm['model'] ?? '?', $tm['tokens'] ?? 0, $tm['chunks'] ?? 0));
         if (!$silent) b24_send($e['dialog_id'], $reply);
         else b24_log("chat {$e['chat_id']}: бот молчит (" . (!empty($st['paused']) ? 'остановлен' : 'пишет оператор') . '), сведения сохранены');
 

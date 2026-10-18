@@ -50,5 +50,5 @@ do {
     if ($once) break;
     // пока идёт переписка — опрашиваем часто, в тишине — реже
     $idle = $got ? 0 : min($idle + 1, 5);
-    sleep($idle < 5 ? 1 : 3);
+    sleep($idle < 5 ? 1 : 2);
 } while (true);
