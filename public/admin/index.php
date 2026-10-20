@@ -9,6 +9,15 @@ session_start();
 
 function h(?string $s): string { return htmlspecialchars((string)$s, ENT_QUOTES, 'UTF-8'); }
 function csrf(): string { return $_SESSION['csrf'] ??= bin2hex(random_bytes(16)); }
+function ini_bytes(string $v): int {
+    $n = (int)$v; $u = strtolower(substr(trim($v), -1));
+    return $n * match ($u) { 'g' => 1 << 30, 'm' => 1 << 20, 'k' => 1 << 10, default => 1 };
+}
+/** Реальный лимит загрузки (меньший из upload_max_filesize и post_max_size). */
+function upload_limit_text(): string {
+    $b = min(ini_bytes((string)ini_get('upload_max_filesize')), ini_bytes((string)ini_get('post_max_size')) ?: PHP_INT_MAX);
+    return round($b / 1048576) . ' МБ';
+}
 function back(string $tab, string $flash = ''): never {
     if ($flash) $_SESSION['flash'] = $flash;
     header('Location: ?tab=' . urlencode($tab)); exit;
@@ -41,6 +50,11 @@ $flash = $_SESSION['flash'] ?? ''; unset($_SESSION['flash']);
 $test = null;
 
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
+    // Файл больше post_max_size: PHP молча выбрасывает всё тело запроса, и $_POST/$_FILES пустые
+    if (!$_POST && !$_FILES && (int)($_SERVER['CONTENT_LENGTH'] ?? 0) > 0) {
+        back($_GET['tab'] ?? 'docs', 'Файл не загрузился: ' . round((int)$_SERVER['CONTENT_LENGTH'] / 1048576, 1)
+            . ' МБ больше лимита сервера (' . upload_limit_text() . '). Проверьте post_max_size / upload_max_filesize.');
+    }
     if (!hash_equals(csrf(), (string)($_POST['csrf'] ?? ''))) { http_response_code(400); exit('CSRF'); }
     $do = $_POST['do'] ?? '';
     try {
@@ -52,6 +66,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 back($_POST['tab'] ?? 'prompt', 'Сохранено. Бот уже отвечает по новой версии.');
             case 'upload':
                 set_time_limit(0);
+                ignore_user_abort(true); // если nginx/браузер отвалится по таймауту — индексация всё равно доведётся до конца
+                @ini_set('memory_limit', '1024M');
                 $f = $_FILES['file'] ?? null;
                 if (!$f || $f['error'] !== UPLOAD_ERR_OK) throw new RuntimeException('Файл не загрузился (код ' . ($f['error'] ?? '?') . '). Проверьте лимиты upload_max_filesize / client_max_body_size.');
                 $ext = strtolower(pathinfo($f['name'], PATHINFO_EXTENSION));
@@ -174,6 +190,7 @@ if (cfg('bitrix_webhook')) $tabs['bitrix'] = 'Битрикс24';
       <li><b>ZIP</b> — архив с любыми файлами выше, например выгрузка базы знаний Битрикс24 целиком.</li>
     </ul>
     <label>Название (как бот будет понимать источник)<input name="title" placeholder="Напр.: База знаний Битрикс24, октябрь 2026"></label>
+    <p class="hint">Максимальный размер файла: <b><?= h(upload_limit_text()) ?></b>. Большой архив индексируется несколько минут — не закрывайте страницу.</p>
     <label>Файл<input type="file" name="file" accept=".<?= implode(',.', SUPPORTED_EXT) ?>" required></label>
     <label>Насколько доверять
       <select name="trust">

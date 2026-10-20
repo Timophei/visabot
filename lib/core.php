@@ -292,30 +292,48 @@ function index_file(string $path, string $origName, string $title, string $trust
     $pages = count($segments);
     $log($pages . ' разделов, ' . count($chunks) . ' фрагментов');
 
-    $vectors = [];
+    unset($segments);
     $useEmb = (bool)cfg('use_embeddings', true);
-    if ($useEmb) {
-        $log('Считаю эмбеддинги…');
-        $vectors = embed(array_map(fn($c) => $title . ($c['source'] !== '' ? ' › ' . $c['source'] : '') . "\n" . $c['text'], $chunks));
-    }
+    $total = count($chunks);
 
+    // Эмбеддинги считаем и пишем пачками: держать в памяти векторы всех фрагментов
+    // большого архива (тысячи × 1536 чисел) — это сотни МБ, PHP падал по memory_limit.
+    // Транзакция — на каждую пачку, чтобы база не была заблокирована для бота на всё время индексации.
     $pdo = db();
-    $pdo->beginTransaction();
-    $pdo->prepare('INSERT INTO documents(title, filename, pages, chunks, has_embeddings, trust, format) VALUES(?,?,?,?,?,?,?)')
-        ->execute([$title, basename($path), $pages, count($chunks), $useEmb ? 1 : 0, $trust === 'aux' ? 'aux' : 'main', strtolower(pathinfo($origName, PATHINFO_EXTENSION))]);
+    $pdo->prepare('INSERT INTO documents(title, filename, pages, chunks, has_embeddings, trust, format, active) VALUES(?,?,?,?,?,?,?,0)')
+        ->execute([$title, basename($path), $pages, $total, $useEmb ? 1 : 0, $trust === 'aux' ? 'aux' : 'main', strtolower(pathinfo($origName, PATHINFO_EXTENSION))]);
     $docId = (int)$pdo->lastInsertId();
     $ins = $pdo->prepare('INSERT INTO chunks(doc_id, page, source, text, embedding) VALUES(?,?,?,?,?)');
     $fts = $pdo->prepare('INSERT INTO chunks_fts(rowid, text) VALUES(?, ?)');
-    foreach ($chunks as $i => $c) {
-        $ins->bindValue(1, $docId, PDO::PARAM_INT);
-        $ins->bindValue(2, $c['page'], PDO::PARAM_INT);
-        $ins->bindValue(3, $c['source']);
-        $ins->bindValue(4, $c['text']);
-        $ins->bindValue(5, $useEmb ? pack_vec($vectors[$i]) : null, $useEmb ? PDO::PARAM_LOB : PDO::PARAM_NULL);
-        $ins->execute();
-        $fts->execute([(int)$pdo->lastInsertId(), $title . ' ' . $c['source'] . ' ' . $c['text']]);
+    try {
+        $done = 0;
+        foreach (array_chunk($chunks, 64) as $batch) {
+            $vectors = $useEmb
+                ? embed(array_map(fn($c) => $title . ($c['source'] !== '' ? ' › ' . $c['source'] : '') . "\n" . $c['text'], $batch))
+                : [];
+            $pdo->beginTransaction();
+            foreach ($batch as $i => $c) {
+                $ins->bindValue(1, $docId, PDO::PARAM_INT);
+                $ins->bindValue(2, $c['page'], PDO::PARAM_INT);
+                $ins->bindValue(3, $c['source']);
+                $ins->bindValue(4, $c['text']);
+                $ins->bindValue(5, $useEmb ? pack_vec($vectors[$i]) : null, $useEmb ? PDO::PARAM_LOB : PDO::PARAM_NULL);
+                $ins->execute();
+                $fts->execute([(int)$pdo->lastInsertId(), $title . ' ' . $c['source'] . ' ' . $c['text']]);
+            }
+            $pdo->commit();
+            $done += count($batch);
+            unset($vectors);
+            if ($useEmb) $log("эмбеддинги: $done из $total");
+        }
+    } catch (Throwable $e) {
+        if ($pdo->inTransaction()) $pdo->rollBack();
+        delete_document($docId); // недоиндексированный материал не оставляем
+        throw $e;
     }
-    $pdo->commit();
+    // Материал включается только когда проиндексирован целиком
+    $pdo->prepare('UPDATE documents SET active = 1 WHERE id = ?')->execute([$docId]);
+    $log($pages . ' разделов, ' . $total . ' фрагментов');
     return $docId;
 }
 

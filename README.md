@@ -144,9 +144,12 @@ sudo ln -s /etc/nginx/sites-available/visa-bot /etc/nginx/sites-enabled/
 sudo nginx -t && sudo systemctl reload nginx
 sudo certbot --nginx -d visabot.b-integration.ru
 
-# 6. Лимит загрузки PDF через админку
-sudo sed -i 's/^upload_max_filesize.*/upload_max_filesize = 100M/; s/^post_max_size.*/post_max_size = 100M/' /etc/php/8.3/fpm/php.ini
-sudo systemctl reload php8.3-fpm
+# 6. Лимит загрузки материалов через админку
+# PHP-лимиты (200 МБ, память 1 ГБ) уже заданы в public/admin/.user.ini — php.ini править не нужно.
+# В nginx должно стоять client_max_body_size 200m и fastcgi_read_timeout 1800 (см. deploy/nginx-visa-bot.conf).
+# Если сайт уже настроен по старому конфигу — обновите его:
+sudo sed -i 's/client_max_body_size [0-9]*m;/client_max_body_size 200m;/; s/fastcgi_read_timeout [0-9]*;/fastcgi_read_timeout 1800;/g' /etc/nginx/sites-available/visa-bot
+sudo nginx -t && sudo systemctl reload nginx
 ```
 
 Домен `visabot.b-integration.ru` должен указывать A-записью на IP сервера.
