@@ -613,8 +613,17 @@ function dialog_messages(int $dialogId, ?int $limit = null): array
 }
 
 /** Последние диалоги всех клиентов (для вкладки «Диалоги»). */
-function recent_dialogs(string $channel = '', int $limit = 150): array
+const DIALOG_SORTS = [
+    'last'    => 'd.last_at',
+    'first'   => 'd.started_at',
+    'count'   => 'd.messages',
+    'channel' => 'd.channel',
+];
+
+function recent_dialogs(string $channel = '', int $limit = 300, string $sort = 'last', string $dir = 'desc'): array
 {
+    $col = DIALOG_SORTS[$sort] ?? DIALOG_SORTS['last'];
+    $dir = strtolower($dir) === 'asc' ? 'ASC' : 'DESC';
     $sql = "SELECT d.*, c.first_name, c.last_name, c.phone, c.tg_username, c.messenger_contact,
                    (SELECT content FROM messages m WHERE m.dialog_id = d.id ORDER BY m.id DESC LIMIT 1) AS last_text,
                    (SELECT role FROM messages m WHERE m.dialog_id = d.id ORDER BY m.id DESC LIMIT 1) AS last_role
@@ -622,7 +631,7 @@ function recent_dialogs(string $channel = '', int $limit = 150): array
             WHERE d.messages > 0 AND d.channel != 'admin'";
     $args = [];
     if ($channel !== '') { $sql .= ' AND d.channel = ?'; $args[] = $channel; }
-    $sql .= ' ORDER BY d.last_at DESC LIMIT ' . (int)$limit;
+    $sql .= " ORDER BY $col $dir, d.last_at DESC LIMIT " . (int)$limit;
     $st = db()->prepare($sql);
     $st->execute($args);
     return $st->fetchAll();

@@ -2,6 +2,7 @@
 declare(strict_types=1);
 require __DIR__ . '/../../lib/core.php';
 require __DIR__ . '/../../lib/bitrix.php';
+require __DIR__ . '/../../lib/export.php';
 
 session_name('visabot_admin');
 session_set_cookie_params(['httponly' => true, 'samesite' => 'Strict', 'secure' => !empty($_SERVER['HTTPS'])]);
@@ -42,6 +43,14 @@ if (empty($_SESSION['ok'])) {
     <?php if ($err): ?><p class="err"><?= h($err) ?></p><?php endif; ?>
     <label>Пароль<input type="password" name="password" autofocus required></label><button>Войти</button></form></body></html><?php
     exit;
+}
+
+/* ---------- выгрузка диалогов (только чтение) ---------- */
+if (isset($_GET['export'])) {
+    $ids = $_GET['ids'] ?? [];
+    if (!is_array($ids)) $ids = explode(',', (string)$ids);
+    if (!$ids) { $_SESSION['flash'] = 'Отметьте галочками диалоги для выгрузки.'; header('Location: ?tab=dialogs'); exit; }
+    export_send($ids, (string)($_GET['format'] ?? 'html'));
 }
 
 /* ---------- действия ---------- */
@@ -251,25 +260,67 @@ if (cfg('bitrix_webhook')) $tabs['bitrix'] = 'Битрикс24';
   <?php
     $ch = $_GET['channel'] ?? '';
     $chans = ['' => 'Все каналы', 'bitrix' => 'Битрикс24', 'telegram' => 'Telegram', 'web' => 'Сайт'];
-    $dl = recent_dialogs(isset($chans[$ch]) ? $ch : '');
+    if (!isset($chans[$ch])) $ch = '';
+    $sort = isset(DIALOG_SORTS[$_GET['sort'] ?? '']) ? $_GET['sort'] : 'last';
+    $dir = ($_GET['dir'] ?? '') === 'asc' ? 'asc' : (($_GET['dir'] ?? '') === 'desc' ? 'desc' : ($sort === 'channel' ? 'asc' : 'desc'));
+    $dl = recent_dialogs($ch, 300, $sort, $dir);
+    $qs = fn(array $p) => '?' . http_build_query(array_merge(['tab' => 'dialogs', 'channel' => $ch, 'sort' => $sort, 'dir' => $dir], $p), '', '&amp;');
+    // заголовок-сортировка: повторный клик меняет направление
+    $th = function (string $key, string $label) use ($sort, $dir, $qs) {
+        $on = $sort === $key;
+        $next = $on ? ($dir === 'asc' ? 'desc' : 'asc') : ($key === 'channel' ? 'asc' : 'desc');
+        return '<a class="sort' . ($on ? ' on' : '') . '" href="' . $qs(['sort' => $key, 'dir' => $next]) . '">' . $label . ($on ? ($dir === 'asc' ? ' ▲' : ' ▼') : '') . '</a>';
+    };
   ?>
-  <nav class="chips"><?php foreach ($chans as $k => $v): ?><a href="?tab=dialogs&channel=<?= $k ?>" class="<?= $ch === $k ? 'on' : '' ?>"><?= $v ?></a><?php endforeach; ?></nav>
-  <div class="card">
-    <h2>Диалоги (<?= count($dl) ?>)</h2>
+  <nav class="chips"><?php foreach ($chans as $k => $v): ?><a href="<?= $qs(['channel' => $k]) ?>" class="<?= $ch === $k ? 'on' : '' ?>"><?= $v ?></a><?php endforeach; ?></nav>
+  <form class="card" method="get" id="dlg-form">
+    <input type="hidden" name="export" value="1">
+    <div class="dlg-head">
+      <h2>Диалоги (<?= count($dl) ?>)</h2>
+      <?php if ($dl): ?>
+      <div class="dlg-actions">
+        <span class="hint" id="dlg-count">не выбрано</span>
+        <select name="format"><option value="html">HTML — с оформлением</option><option value="txt">TXT — простой текст</option></select>
+        <button id="dlg-export" disabled>Выгрузить выбранные</button>
+      </div>
+      <?php endif; ?>
+    </div>
+    <p class="hint">Сортировка — щелчок по заголовку столбца, повторный щелчок меняет направление. Время — <?= h(tz_label()) ?>.</p>
     <?php if (!$dl): ?><p class="hint">Пока нет диалогов.</p><?php else: ?>
-    <table class="clients">
-      <tr><th>Клиент</th><th>Канал</th><th>Последнее сообщение</th><th>Сообщ.</th><th>Обновлён</th></tr>
+    <table class="clients dialogs">
+      <tr>
+        <th class="cb"><input type="checkbox" id="dlg-all" title="Выбрать все"></th>
+        <th>Клиент</th><th><?= $th('channel', 'Канал') ?></th><th>Последнее сообщение</th>
+        <th><?= $th('count', 'Сообщ.') ?></th><th><?= $th('first', 'Начат') ?></th><th><?= $th('last', 'Обновлён') ?></th><th></th>
+      </tr>
       <?php foreach ($dl as $d): $cl = array_merge($d, ['id' => $d['client_id']]); ?>
-        <tr onclick="location='?tab=clients&id=<?= $d['client_id'] ?>#d<?= $d['id'] ?>'">
-          <td><a href="?tab=clients&id=<?= $d['client_id'] ?>#d<?= $d['id'] ?>"><?= h(client_display_name($cl)) ?></a></td>
+        <tr onclick="location='?tab=clients&id=<?= $d['client_id'] ?>&d=<?= $d['id'] ?>#d<?= $d['id'] ?>'">
+          <td class="cb" onclick="event.stopPropagation()"><input type="checkbox" name="ids[]" value="<?= (int)$d['id'] ?>"></td>
+          <td><a href="?tab=clients&id=<?= $d['client_id'] ?>&d=<?= $d['id'] ?>#d<?= $d['id'] ?>"><?= h(client_display_name($cl)) ?></a></td>
           <td class="nw"><?= h($channelName[$d['channel']] ?? $d['channel']) ?><?php if ($d['channel'] === 'bitrix' && $d['ext_id']): ?><br><small><a href="<?= h(b24_chat_url($d['ext_id'])) ?>" target="_blank" onclick="event.stopPropagation()">чат в Б24</a></small><?php endif; ?></td>
-          <td><small><?= ['user' => 'Клиент', 'assistant' => 'Бот', 'operator' => 'Менеджер'][$d['last_role']] ?? '' ?>:</small> <?= h(mb_strimwidth((string)$d['last_text'], 0, 140, '…')) ?></td>
+          <td><small><?= ROLE_NAMES[$d['last_role']] ?? '' ?>:</small> <?= h(mb_strimwidth((string)$d['last_text'], 0, 140, '…')) ?></td>
           <td><?= (int)$d['messages'] ?></td>
-          <td class="nw"><?= h($d['last_at']) ?></td>
+          <td class="nw"><?= h(fmt_dt($d['started_at'])) ?></td>
+          <td class="nw"><?= h(fmt_dt($d['last_at'])) ?></td>
+          <td class="nw" onclick="event.stopPropagation()"><a href="?export=1&amp;ids=<?= (int)$d['id'] ?>" title="Выгрузить этот диалог">⤓ выгрузить</a></td>
         </tr>
       <?php endforeach; ?>
     </table><?php endif; ?>
-  </div>
+  </form>
+  <script>
+  (function () {
+    const all = document.getElementById('dlg-all'); if (!all) return;
+    const boxes = [...document.querySelectorAll('#dlg-form input[name="ids[]"]')];
+    const btn = document.getElementById('dlg-export'), cnt = document.getElementById('dlg-count');
+    const upd = () => {
+      const n = boxes.filter(b => b.checked).length;
+      btn.disabled = !n; cnt.textContent = n ? 'выбрано: ' + n : 'не выбрано';
+      all.checked = n === boxes.length; all.indeterminate = n > 0 && n < boxes.length;
+    };
+    all.addEventListener('change', () => { boxes.forEach(b => b.checked = all.checked); upd(); });
+    boxes.forEach(b => b.addEventListener('change', upd));
+  })();
+  </script>
 
 <?php elseif ($tab === 'bitrix'): ?>
   <?php
@@ -404,9 +455,9 @@ if (cfg('bitrix_webhook')) $tabs['bitrix'] = 'Битрикс24';
   <?php if (!$dialogs): ?><p class="hint">Диалогов нет.</p><?php endif; ?>
   <?php foreach ($dialogs as $i => $d): ?>
     <details class="card dialog" id="d<?= $d['id'] ?>" <?= $i === 0 || (int)($_GET['d'] ?? 0) === (int)$d['id'] ? 'open' : '' ?>>
-      <summary>Диалог #<?= $d['id'] ?> · <?= h($channelName[$d['channel']] ?? $d['channel']) ?> · <?= h($d['started_at']) ?> — <?= h($d['last_at']) ?> · <?= (int)$d['messages'] ?> сообщ.<?php if ($d['channel'] === 'bitrix' && $d['ext_id']): ?> · <a href="<?= h(b24_chat_url($d['ext_id'])) ?>" target="_blank" onclick="event.stopPropagation()">открыть чат в Битрикс24</a><?php endif; ?></summary>
+      <summary>Диалог #<?= $d['id'] ?> · <?= h($channelName[$d['channel']] ?? $d['channel']) ?> · <?= h(fmt_dt($d['started_at'])) ?> — <?= h(fmt_dt($d['last_at'])) ?> · <?= (int)$d['messages'] ?> сообщ. · <a href="?export=1&amp;ids=<?= (int)$d['id'] ?>" onclick="event.stopPropagation()">⤓ выгрузить</a><?php if ($d['channel'] === 'bitrix' && $d['ext_id']): ?> · <a href="<?= h(b24_chat_url($d['ext_id'])) ?>" target="_blank" onclick="event.stopPropagation()">открыть чат в Битрикс24</a><?php endif; ?></summary>
       <div class="chatlog"><?php foreach (dialog_messages((int)$d['id']) as $m): ?>
-        <div class="msg <?= $m['role'] ?>"><small><?= ['user' => 'Клиент', 'operator' => 'Менеджер', 'assistant' => 'Бот'][$m['role']] ?? $m['role'] ?> · <?= h($m['created_at']) ?></small><?= nl2br(h($m['content'])) ?></div>
+        <div class="msg <?= $m['role'] ?>"><small><?= ROLE_NAMES[$m['role']] ?? $m['role'] ?> · <?= h(fmt_dt($m['created_at'])) ?></small><?= nl2br(h($m['content'])) ?></div>
       <?php endforeach; ?></div>
     </details>
   <?php endforeach; ?>

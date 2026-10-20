@@ -68,3 +68,13 @@ code{background:#f0f2f6;padding:1px 5px;border-radius:4px}
 .good{color:#1e7a3c}.bad{color:#a32020}
 form.row-form{display:flex;gap:10px;align-items:flex-end;flex-wrap:wrap}form.row-form label{margin:0}form.row-form input{width:100px;display:block}form.row-form button{margin:0}
 pre.log{max-height:420px;overflow:auto;font-size:12px}
+/* Диалоги: сортировка, выбор, выгрузка */
+.dlg-head{display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap}
+.dlg-actions{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+.dlg-actions .hint{margin:0}
+.dlg-actions select{width:auto;margin:0;border:1px solid #cad2de;border-radius:8px;padding:8px;font:inherit;font-size:14px;background:#fff}
+.dlg-actions button{margin:0}
+table.clients th a.sort{color:#1d2330;font-weight:600;text-decoration:none;white-space:nowrap}
+table.clients th a.sort:hover,table.clients th a.sort.on{color:var(--c)}
+table.dialogs .cb{width:28px;cursor:default}
+table.dialogs .cb input{width:16px;height:16px;cursor:pointer}
