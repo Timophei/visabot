@@ -78,3 +78,10 @@ table.clients th a.sort{color:#1d2330;font-weight:600;text-decoration:none;white
 table.clients th a.sort:hover,table.clients th a.sort.on{color:var(--c)}
 table.dialogs .cb{width:28px;cursor:default}
 table.dialogs .cb input{width:16px;height:16px;cursor:pointer}
+/* вход и пользователи */
+body.login label.row{margin-top:-2px}
+header .who{display:flex;gap:14px;align-items:center;margin-left:auto}
+header .who a.on{font-weight:600}
+.card.narrow{max-width:460px}
+table.users input:not([type=checkbox]),table.users select{min-width:110px;padding:6px 8px}
+table.users td{vertical-align:middle}

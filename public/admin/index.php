@@ -3,6 +3,7 @@ declare(strict_types=1);
 require __DIR__ . '/../../lib/core.php';
 require __DIR__ . '/../../lib/bitrix.php';
 require __DIR__ . '/../../lib/export.php';
+require __DIR__ . '/../../lib/auth.php';
 
 session_name('visabot_admin');
 session_set_cookie_params(['httponly' => true, 'samesite' => 'Strict', 'secure' => !empty($_SERVER['HTTPS'])]);
@@ -25,24 +26,60 @@ function back(string $tab, string $flash = ''): never {
 }
 
 /* ---------- вход ---------- */
-if (isset($_GET['logout'])) { session_destroy(); header('Location: ./'); exit; }
-if (empty($_SESSION['ok'])) {
+function auth_page(string $title, string $body): never {
+    ?><!doctype html><html lang="ru"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+    <title><?= h($title) ?> — визовый бот</title><link rel="stylesheet" href="admin.css"><link rel="icon" href="favicon.svg" type="image/svg+xml"><link rel="icon" href="favicon.ico" sizes="any"><link rel="apple-touch-icon" href="apple-touch-icon.png">
+    <body class="login"><?= $body ?></body></html><?php
+    exit;
+}
+if (isset($_GET['logout'])) { logout(); header('Location: ./'); exit; }
+
+if (!users_exist()) {
+    // Первый запуск: создаём первого администратора
+    $err = '';
+    if ($_SERVER['REQUEST_METHOD'] === 'POST' && hash_equals(csrf(), (string)($_POST['csrf'] ?? ''))) {
+        try {
+            if ((string)$_POST['password'] !== (string)$_POST['password2']) throw new RuntimeException('Пароли не совпадают.');
+            $id = create_user((string)$_POST['login'], (string)$_POST['name'], (string)$_POST['password'], 'admin');
+            start_user_session(user_by_id($id), true);
+            header('Location: ./'); exit;
+        } catch (Throwable $e) { $err = $e->getMessage(); }
+    }
+    auth_page('Первый вход', '<form method="post" class="card"><h1>Визовый бот</h1>'
+        . '<p class="hint">Пользователей ещё нет. Создайте первого — он будет администратором.</p>'
+        . ($err ? '<p class="err">' . h($err) . '</p>' : '')
+        . '<input type="hidden" name="csrf" value="' . csrf() . '">'
+        . '<label>Логин<input name="login" autocomplete="username" autocapitalize="none" spellcheck="false" required value="' . h($_POST['login'] ?? '') . '"></label>'
+        . '<label>Имя<input name="name" value="' . h($_POST['name'] ?? '') . '" placeholder="Как подписывать в админке"></label>'
+        . '<label>Пароль<input type="password" name="password" autocomplete="new-password" minlength="8" required></label>'
+        . '<label>Ещё раз<input type="password" name="password2" autocomplete="new-password" minlength="8" required></label>'
+        . '<button>Создать и войти</button></form>');
+}
+
+$me = current_user();
+if (!$me) {
     $err = '';
     if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         usleep(400000); // замедляем перебор паролей
-        if (cfg('admin_password_hash') && password_verify((string)($_POST['password'] ?? ''), cfg('admin_password_hash'))) {
-            session_regenerate_id(true);
-            $_SESSION['ok'] = true;
-            header('Location: ./'); exit;
+        if (login_blocked()) {
+            $err = 'Слишком много неудачных попыток. Подождите 15 минут.';
+        } elseif ($u = attempt_login((string)($_POST['login'] ?? ''), (string)($_POST['password'] ?? ''))) {
+            start_user_session($u, !empty($_POST['remember']));
+            $back = (string)($_POST['back'] ?? '');
+            header('Location: ' . (preg_match('/^\?[\w=&%.-]*$/', $back) ? './' . $back : './')); exit;
+        } else {
+            $err = 'Неверный логин или пароль';
         }
-        $err = cfg('admin_password_hash') ? 'Неверный пароль' : 'Пароль не задан в config.php (admin_password_hash)';
     }
-    ?><!doctype html><html lang="ru"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-    <title>Вход — визовый бот</title><link rel="stylesheet" href="admin.css"><link rel="icon" href="favicon.svg" type="image/svg+xml"><link rel="icon" href="favicon.ico" sizes="any"><link rel="apple-touch-icon" href="apple-touch-icon.png">
-    <body class="login"><form method="post" class="card"><h1>Визовый бот</h1>
-    <?php if ($err): ?><p class="err"><?= h($err) ?></p><?php endif; ?>
-    <label>Пароль<input type="password" name="password" autofocus required></label><button>Войти</button></form></body></html><?php
-    exit;
+    $back = $_POST['back'] ?? (($_SERVER['QUERY_STRING'] ?? '') !== '' ? '?' . $_SERVER['QUERY_STRING'] : '');
+    auth_page('Вход', '<form method="post" class="card"><h1>Визовый бот</h1>'
+        . ($err ? '<p class="err">' . h($err) . '</p>' : '')
+        . '<input type="hidden" name="back" value="' . h((string)$back) . '">'
+        . '<label>Логин<input name="login" autocomplete="username" autocapitalize="none" spellcheck="false" required'
+        . ($_POST['login'] ?? '' ? ' value="' . h((string)$_POST['login']) . '"' : ' autofocus') . '></label>'
+        . '<label>Пароль<input type="password" name="password" autocomplete="current-password" required' . (($_POST['login'] ?? '') ? ' autofocus' : '') . '></label>'
+        . '<label class="row"><input type="checkbox" name="remember" value="1" checked> Запомнить этот компьютер на ' . REMEMBER_DAYS . ' дней</label>'
+        . '<button>Войти</button></form>');
 }
 
 /* ---------- выгрузка диалогов (только чтение) ---------- */
@@ -140,6 +177,35 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             case 'b24_pause':
                 set_setting('b24_pause', (string)max(0, (int)$_POST['pause']));
                 back('bitrix', 'Пауза сохранена.');
+            case 'my_password':
+                if (!password_verify((string)$_POST['old'], $me['password_hash'])) throw new RuntimeException('Текущий пароль указан неверно.');
+                if ((string)$_POST['password'] !== (string)$_POST['password2']) throw new RuntimeException('Новые пароли не совпадают.');
+                set_user_password((int)$me['id'], (string)$_POST['password']);
+                if (isset($_COOKIE[REMEMBER_COOKIE])) issue_remember_token((int)$me['id']); // этот компьютер остаётся запомненным
+                back('me', 'Пароль изменён. На других компьютерах нужно будет войти заново.');
+            case 'my_forget':
+                forget_all_devices((int)$me['id']);
+                clear_remember_cookie();
+                back('me', 'Все запомненные компьютеры сброшены. Сейчас вы остаётесь в админке до закрытия браузера.');
+            case 'user_add':
+                if (!can('users')) throw new RuntimeException('Нет доступа.');
+                $id = create_user((string)$_POST['login'], (string)$_POST['name'], (string)$_POST['password'], (string)$_POST['role']);
+                back('users', 'Пользователь «' . trim((string)$_POST['login']) . '» создан.');
+            case 'user_save':
+                if (!can('users')) throw new RuntimeException('Нет доступа.');
+                $uid = (int)$_POST['id'];
+                update_user($uid, ['name' => $_POST['name'] ?? '', 'role' => $_POST['role'] ?? '', 'active' => !empty($_POST['active'])]);
+                if (trim((string)($_POST['password'] ?? '')) !== '') set_user_password($uid, (string)$_POST['password']);
+                back('users', 'Сохранено.');
+            case 'user_forget':
+                if (!can('users')) throw new RuntimeException('Нет доступа.');
+                forget_all_devices((int)$_POST['id']);
+                back('users', 'Запомненные компьютеры пользователя сброшены.');
+            case 'user_delete':
+                if (!can('users')) throw new RuntimeException('Нет доступа.');
+                if ((int)$_POST['id'] === (int)$me['id']) throw new RuntimeException('Себя удалить нельзя.');
+                delete_user((int)$_POST['id']);
+                back('users', 'Пользователь удалён.');
             case 'delete_client':
                 delete_client((int)$_POST['id']);
                 back('clients', 'Клиент и все его диалоги удалены.');
@@ -154,13 +220,16 @@ $docs = db()->query('SELECT * FROM documents ORDER BY id DESC')->fetchAll();
 $tabs = ['requests' => 'Лиды', 'dialogs' => 'Диалоги', 'clients' => 'Клиенты', 'prompt' => 'Промт', 'company' => 'Данные компании', 'docs' => 'Материалы', 'test' => 'Проверка'];
 $channelName = CHANNEL_NAMES;
 if (cfg('bitrix_webhook')) $tabs['bitrix'] = 'Битрикс24';
+if (can('users')) $tabs['users'] = 'Пользователи';
+if ($tab === 'users' && !can('users')) $tab = 'requests';
 ?><!doctype html>
 <html lang="ru"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <title>Админка — визовый бот</title><link rel="stylesheet" href="admin.css"><link rel="icon" href="favicon.svg" type="image/svg+xml"><link rel="icon" href="favicon.ico" sizes="any"><link rel="apple-touch-icon" href="apple-touch-icon.png">
 <body>
 <header><b>Визовый бот</b>
   <nav><?php foreach ($tabs as $k => $v): ?><a href="?tab=<?= $k ?>" class="<?= $tab === $k ? 'on' : '' ?>"><?= $v ?></a><?php endforeach; ?></nav>
-  <a href="?logout=1" class="out">Выйти</a>
+  <span class="who"><a href="?tab=me" class="<?= $tab === 'me' ? 'on' : '' ?>" title="<?= h(ROLES[$me['role']] ?? $me['role']) ?>"><?= h($me['name'] ?: $me['login']) ?></a>
+  <a href="?logout=1" class="out">Выйти</a></span>
 </header>
 <main>
 <?php if ($flash): ?><p class="<?= str_starts_with($flash, 'Ошибка') ? 'err' : 'ok' ?>"><?= h($flash) ?></p><?php endif; ?>
@@ -485,6 +554,60 @@ if (cfg('bitrix_webhook')) $tabs['bitrix'] = 'Битрикс24';
       <?php endforeach; ?>
     </table><?php endif; ?>
   </div>
+<?php elseif ($tab === 'me'): ?>
+  <div class="card">
+    <h2><?= h($me['name'] ?: $me['login']) ?></h2>
+    <p>Логин: <b><?= h($me['login']) ?></b> · Роль: <?= h(ROLES[$me['role']] ?? $me['role']) ?></p>
+  </div>
+  <form method="post" class="card narrow">
+    <input type="hidden" name="csrf" value="<?= csrf() ?>"><input type="hidden" name="do" value="my_password"><input type="hidden" name="tab" value="me">
+    <input type="text" name="login" value="<?= h($me['login']) ?>" autocomplete="username" hidden>
+    <h2>Сменить пароль</h2>
+    <label>Текущий пароль<input type="password" name="old" autocomplete="current-password" required></label>
+    <label>Новый пароль<input type="password" name="password" autocomplete="new-password" minlength="8" required></label>
+    <label>Ещё раз<input type="password" name="password2" autocomplete="new-password" minlength="8" required></label>
+    <button>Сменить</button>
+  </form>
+  <form method="post" class="card" onsubmit="return confirm('Выйти на всех запомненных компьютерах?')">
+    <input type="hidden" name="csrf" value="<?= csrf() ?>"><input type="hidden" name="do" value="my_forget"><input type="hidden" name="tab" value="me">
+    <h2>Запомненные компьютеры</h2>
+    <p class="hint">Если входили с чужого компьютера и оставили галочку «Запомнить» — сбросьте.</p>
+    <button class="sec">Забыть все компьютеры</button>
+  </form>
+
+<?php elseif ($tab === 'users'): ?>
+  <div class="card">
+    <h2>Пользователи админки</h2>
+    <table class="users">
+      <tr><th>Логин</th><th>Имя</th><th>Роль</th><th>Активен</th><th>Новый пароль</th><th>Последний вход</th><th></th></tr>
+      <?php foreach (list_users() as $u): $f = 'u' . $u['id']; ?>
+        <tr class="<?= $u['active'] ? '' : 'off' ?>">
+          <td><b><?= h($u['login']) ?></b><?= (int)$u['id'] === (int)$me['id'] ? ' <span class="hint">(вы)</span>' : '' ?></td>
+          <td><input name="name" form="<?= $f ?>" value="<?= h($u['name']) ?>"></td>
+          <td><select name="role" form="<?= $f ?>"><?php foreach (ROLES as $k => $v): ?><option value="<?= $k ?>"<?= $u['role'] === $k ? ' selected' : '' ?>><?= $v ?></option><?php endforeach; ?></select></td>
+          <td><input type="checkbox" name="active" value="1" form="<?= $f ?>"<?= $u['active'] ? ' checked' : '' ?>></td>
+          <td><input type="password" name="password" form="<?= $f ?>" autocomplete="new-password" minlength="8" placeholder="не менять"></td>
+          <td class="nw"><?= h($u['last_login_at'] ? fmt_dt($u['last_login_at']) : '—') ?><?= $u['devices'] ? '<br><span class="hint">запомнен на ' . (int)$u['devices'] . ' устр.</span>' : '' ?></td>
+          <td class="act">
+            <form method="post" id="<?= $f ?>"><input type="hidden" name="csrf" value="<?= csrf() ?>"><input type="hidden" name="do" value="user_save"><input type="hidden" name="id" value="<?= $u['id'] ?>"><button>Сохранить</button></form>
+            <?php if ($u['devices']): ?><form method="post"><input type="hidden" name="csrf" value="<?= csrf() ?>"><input type="hidden" name="do" value="user_forget"><input type="hidden" name="id" value="<?= $u['id'] ?>"><button class="sec">Забыть устройства</button></form><?php endif; ?>
+            <?php if ((int)$u['id'] !== (int)$me['id']): ?><form method="post" onsubmit="return confirm('Удалить пользователя <?= h($u['login']) ?>?')"><input type="hidden" name="csrf" value="<?= csrf() ?>"><input type="hidden" name="do" value="user_delete"><input type="hidden" name="id" value="<?= $u['id'] ?>"><button class="danger">Удалить</button></form><?php endif; ?>
+          </td>
+        </tr>
+      <?php endforeach; ?>
+    </table>
+    <p class="hint">Новый пароль или отключение сразу выкидывают пользователя со всех запомненных компьютеров.</p>
+  </div>
+  <form method="post" class="card narrow">
+    <input type="hidden" name="csrf" value="<?= csrf() ?>"><input type="hidden" name="do" value="user_add"><input type="hidden" name="tab" value="users">
+    <h2>Добавить пользователя</h2>
+    <label>Логин<input name="login" autocomplete="off" autocapitalize="none" spellcheck="false" required placeholder="латиница, напр. anna"></label>
+    <label>Имя<input name="name" placeholder="Анна, менеджер"></label>
+    <label>Пароль<input type="password" name="password" autocomplete="new-password" minlength="8" required></label>
+    <label>Роль<select name="role"><?php foreach (ROLES as $k => $v): ?><option value="<?= $k ?>"<?= $k === 'manager' ? ' selected' : '' ?>><?= $v ?></option><?php endforeach; ?></select></label>
+    <p class="hint">Сейчас обе роли видят всю админку, кроме того, что вкладка «Пользователи» — только у администраторов. Ограничения для менеджеров добавим, когда понадобятся.</p>
+    <button>Добавить</button>
+  </form>
 <?php endif; ?>
 </main>
 </body></html>
