@@ -38,7 +38,7 @@ if (empty($_SESSION['ok'])) {
         $err = cfg('admin_password_hash') ? 'Неверный пароль' : 'Пароль не задан в config.php (admin_password_hash)';
     }
     ?><!doctype html><html lang="ru"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-    <title>Вход — визовый бот</title><link rel="stylesheet" href="admin.css">
+    <title>Вход — визовый бот</title><link rel="stylesheet" href="admin.css"><link rel="icon" href="favicon.svg" type="image/svg+xml"><link rel="icon" href="favicon.ico" sizes="any"><link rel="apple-touch-icon" href="apple-touch-icon.png">
     <body class="login"><form method="post" class="card"><h1>Визовый бот</h1>
     <?php if ($err): ?><p class="err"><?= h($err) ?></p><?php endif; ?>
     <label>Пароль<input type="password" name="password" autofocus required></label><button>Войти</button></form></body></html><?php
@@ -156,7 +156,7 @@ $channelName = CHANNEL_NAMES;
 if (cfg('bitrix_webhook')) $tabs['bitrix'] = 'Битрикс24';
 ?><!doctype html>
 <html lang="ru"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<title>Админка — визовый бот</title><link rel="stylesheet" href="admin.css">
+<title>Админка — визовый бот</title><link rel="stylesheet" href="admin.css"><link rel="icon" href="favicon.svg" type="image/svg+xml"><link rel="icon" href="favicon.ico" sizes="any"><link rel="apple-touch-icon" href="apple-touch-icon.png">
 <body>
 <header><b>Визовый бот</b>
   <nav><?php foreach ($tabs as $k => $v): ?><a href="?tab=<?= $k ?>" class="<?= $tab === $k ? 'on' : '' ?>"><?= $v ?></a><?php endforeach; ?></nav>
